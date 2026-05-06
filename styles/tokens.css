@@ -1,0 +1,35 @@
+/* styles/tokens.css — AI Office Design Tokens */
+
+:root {
+  /* Primary — Teal (Orchestrator / 주요 액션) */
+  --color-primary: #0f766e;
+  --color-primary-light: #22d3ee;
+  --color-primary-hover: #0e7490;
+  --color-primary-muted: rgba(34, 211, 238, 0.16);
+
+  /* Agent — Amber (Agent 강조색) */
+  --color-agent: #f59e0b;
+  --color-agent-dark: #b45309;
+
+  /* Semantic */
+  --color-danger: #dc2626;
+  --color-danger-hover: #b91c1c;
+  --color-danger-bg: #b91c1c;
+  --color-info: #2563eb;
+  --color-success: #16a34a;
+  --color-meeting: #7c3aed;
+  --color-warning: #d97706;
+  --color-working: #0284c7;
+  --color-stalled: #ea580c;
+
+  /* Text */
+  --text: #17212b;
+  --text-secondary: #34495e;
+  --text-muted: #627386;
+  --text-dim: #8a98a8;
+
+  /* Spacing aliases */
+  --gap-tight: 4px;
+  --gap-normal: 8px;
+  --gap-loose: 16px;
+}
