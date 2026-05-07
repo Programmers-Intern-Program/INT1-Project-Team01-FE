@@ -1,12 +1,12 @@
 import { apiFetch } from "../api-client";
 
 export type TaskStatus =
-  | "PENDING"
+  | "REQUESTED"
   | "ASSIGNED"
   | "IN_PROGRESS"
+  | "WAITING_USER"
   | "COMPLETED"
   | "FAILED"
-  | "ON_HOLD"
   | "CANCELED";
 
 export interface WorkspaceTask {
@@ -26,8 +26,21 @@ export interface CreateTaskReq {
   assignedAgentId?: string | number;
 }
 
-export function listWorkspaceTasks(workspaceId: number) {
-  return apiFetch<WorkspaceTask[]>(`/api/v1/workspaces/${workspaceId}/tasks`);
+interface Page<T> {
+  content: T[];
+  totalPages?: number;
+  totalElements?: number;
+  first?: boolean;
+  last?: boolean;
+  numberOfElements?: number;
+}
+
+export async function listWorkspaceTasks(workspaceId: number): Promise<WorkspaceTask[]> {
+  const res = await apiFetch<Page<WorkspaceTask> | WorkspaceTask[]>(
+    `/api/v1/workspaces/${workspaceId}/tasks`,
+  );
+  if (Array.isArray(res)) return res;
+  return res?.content ?? [];
 }
 
 export function createWorkspaceTask(workspaceId: number, body: CreateTaskReq) {

@@ -114,12 +114,12 @@ const STATUS_META: Record<
 };
 
 const TASK_STATUS_META: Record<TaskStatus, { label: string; className: string }> = {
-  PENDING: { label: "대기", className: "bg-surface-raised text-text-muted" },
+  REQUESTED: { label: "요청됨", className: "bg-surface-raised text-text-muted" },
   ASSIGNED: { label: "배정됨", className: "bg-info/15 text-info" },
   IN_PROGRESS: { label: "진행 중", className: "bg-working/15 text-working" },
+  WAITING_USER: { label: "대기", className: "bg-warning/15 text-warning" },
   COMPLETED: { label: "완료", className: "bg-success/15 text-success" },
   FAILED: { label: "실패", className: "bg-danger/15 text-danger" },
-  ON_HOLD: { label: "보류", className: "bg-warning/15 text-warning" },
   CANCELED: { label: "취소", className: "bg-surface-raised text-text-dim" },
 };
 
@@ -132,7 +132,7 @@ const TASK_BOARD_GROUPS: Array<{
   {
     key: "requested",
     label: "요청",
-    statuses: ["PENDING", "ON_HOLD"],
+    statuses: ["REQUESTED", "WAITING_USER"],
     className: "bg-surface-raised text-text-muted",
   },
   {
