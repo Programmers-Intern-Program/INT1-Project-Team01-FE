@@ -21,6 +21,7 @@ import {
   type InviteStatus,
 } from "@/lib/api/invites";
 import {
+  changeMemberRole,
   deleteWorkspace,
   getWorkspace,
   listWorkspaceMembers,
@@ -70,6 +71,7 @@ export default function WorkspaceSettingsPage({
   const [updateError, setUpdateError] = useState("");
 
   const [removingMemberId, setRemovingMemberId] = useState<number | null>(null);
+  const [changingRoleMemberId, setChangingRoleMemberId] = useState<number | null>(null);
   const [memberError, setMemberError] = useState("");
 
   const [inviteEmail, setInviteEmail] = useState("");
@@ -177,6 +179,28 @@ export default function WorkspaceSettingsPage({
       setUpdateError(apiErr?.message ?? "워크스페이스 정보 변경에 실패했습니다.");
     } finally {
       setUpdateBusy(false);
+    }
+  }
+
+  async function handleChangeRole(memberId: number, nextRole: WorkspaceRole) {
+    if (!isAdmin) return;
+    setChangingRoleMemberId(memberId);
+    setMemberError("");
+    try {
+      await changeMemberRole(workspaceIdNumber, memberId, nextRole);
+      setState((prev) => prev.kind === "ready"
+        ? {
+            ...prev,
+            members: prev.members.map((member) =>
+              member.memberId === memberId ? { ...member, role: nextRole } : member,
+            ),
+          }
+        : prev);
+    } catch (err) {
+      const apiErr = err as ApiError;
+      setMemberError(apiErr?.message ?? "멤버 역할 변경에 실패했습니다.");
+    } finally {
+      setChangingRoleMemberId(null);
     }
   }
 
@@ -520,14 +544,23 @@ export default function WorkspaceSettingsPage({
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
-                        <RoleTag role={member.role} />
+                        {isAdmin ? (
+                          <RoleToggle
+                            role={member.role}
+                            busy={changingRoleMemberId === member.memberId}
+                            disabled={changingRoleMemberId !== null || removingMemberId !== null}
+                            onChange={(next) => handleChangeRole(member.memberId, next)}
+                          />
+                        ) : (
+                          <RoleTag role={member.role} />
+                        )}
                         <Button
                           type="button"
                           variant="danger"
                           size="sm"
                           icon={<Trash2 />}
                           loading={removingMemberId === member.memberId}
-                          disabled={!isAdmin || removingMemberId !== null}
+                          disabled={!isAdmin || removingMemberId !== null || changingRoleMemberId !== null}
                           onClick={() => handleRemoveMember(member.memberId)}
                         >
                           KICK
@@ -1009,6 +1042,61 @@ function RoleTag({ role }: { role: WorkspaceRole }) {
     >
       {role}
     </span>
+  );
+}
+
+function RoleToggle({
+  role,
+  busy,
+  disabled,
+  onChange,
+}: {
+  role: WorkspaceRole;
+  busy: boolean;
+  disabled: boolean;
+  onChange: (next: WorkspaceRole) => void;
+}) {
+  const ROLES: WorkspaceRole[] = ["ADMIN", "MEMBER"];
+  return (
+    <div
+      role="group"
+      aria-label="역할 변경"
+      style={{
+        display: "inline-flex",
+        border: `1px solid ${t4.line}`,
+        background: "rgba(0,0,0,0.3)",
+      }}
+    >
+      {ROLES.map((r) => {
+        const active = r === role;
+        const color = r === "ADMIN" ? t4.pink : t4.mp;
+        return (
+          <button
+            key={r}
+            type="button"
+            onClick={() => {
+              if (active || disabled) return;
+              onChange(r);
+            }}
+            disabled={disabled || active}
+            aria-pressed={active}
+            style={{
+              fontFamily: "var(--font-pixel)",
+              fontSize: 7,
+              letterSpacing: 1,
+              padding: "4px 8px",
+              color: active ? "#000" : color,
+              background: active ? color : "transparent",
+              border: "none",
+              cursor: active || disabled ? "default" : "pointer",
+              opacity: disabled && !active ? 0.5 : 1,
+            }}
+          >
+            {busy && active ? "..." : r}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
