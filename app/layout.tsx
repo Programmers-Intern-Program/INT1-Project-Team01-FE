@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, JetBrains_Mono, Press_Start_2P, VT323 } from "next/font/google";
 import "./globals.css";
 import Providers from "./providers";
 
@@ -8,8 +8,20 @@ const geistSans = Geist({
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-mono-arcade",
+  subsets: ["latin"],
+});
+
+const pressStart = Press_Start_2P({
+  variable: "--font-pixel",
+  weight: "400",
+  subsets: ["latin"],
+});
+
+const vt323 = VT323({
+  variable: "--font-vt323",
+  weight: "400",
   subsets: ["latin"],
 });
 
@@ -26,9 +38,9 @@ export default function RootLayout({
   return (
     <html
       lang="ko"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${jetbrainsMono.variable} ${pressStart.variable} ${vt323.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
+      <body className="theme-web min-h-full flex flex-col">
         <Providers>{children}</Providers>
       </body>
     </html>

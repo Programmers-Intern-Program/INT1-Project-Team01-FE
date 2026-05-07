@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
-import { Building2 } from "lucide-react";
-import { Badge, Button } from "@/components/ui";
+import { Button } from "@/components/ui";
+import { T4Screen, T4Panel, PixelAvatar } from "@/components/arcade";
+import { t4 } from "@/components/arcade/tokens";
 import { getStoredUser, type ApiError } from "@/lib/api-client";
 import {
   acceptInvite,
@@ -33,7 +34,7 @@ export default function InviteAcceptPage({
     queueMicrotask(() => {
       if (cancelled) return;
       if (!getStoredUser()) {
-        router.replace(`/auth?returnTo=${encodeURIComponent(`/invites/${token}`)}`);
+        router.replace("/");
       }
     });
     return () => {
@@ -76,38 +77,101 @@ export default function InviteAcceptPage({
   }
 
   return (
-    <main className="theme-web flex-1 min-h-screen flex items-center justify-center px-4 py-10">
-      <div className="w-full max-w-md flex flex-col gap-5">
-        <header className="text-center flex flex-col gap-1">
-          <h1 className="text-heading text-text">워크스페이스 초대</h1>
-          <p className="text-caption text-text-muted">
-            초대를 확인하고 참여하세요.
-          </p>
-        </header>
-
-        <section className="rounded-xl border border-border bg-surface px-6 py-6 flex flex-col gap-5">
-          {state.kind === "loading" && <Skeleton />}
-          {state.kind === "error" && (
-            <p className="text-body text-danger text-center">{state.message}</p>
-          )}
-          {state.kind === "ready" && (
-            <InviteBody
-              invite={state.invite}
-              accepting={accepting}
-              acceptError={acceptError}
-              onAccept={handleAccept}
-            />
-          )}
-        </section>
-
-        <Link
-          href="/workspaces"
-          className="text-caption text-text-muted text-center hover:text-text"
+    <T4Screen title="WORKSPACE INVITE · WARP IN">
+      <div
+        style={{
+          height: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "30px 22px",
+        }}
+      >
+        <div
+          style={{
+            width: "100%",
+            maxWidth: 520,
+            display: "flex",
+            flexDirection: "column",
+            gap: 20,
+          }}
         >
-          내 워크스페이스로 이동
-        </Link>
+          <header style={{ textAlign: "center" }}>
+            <div
+              style={{
+                fontFamily: "var(--font-pixel)",
+                fontSize: 8,
+                letterSpacing: 3,
+                color: t4.pink,
+                marginBottom: 6,
+              }}
+            >
+              ◆ INVITATION
+            </div>
+            <h1
+              style={{
+                fontFamily: "var(--font-pixel)",
+                fontSize: 22,
+                letterSpacing: 2,
+                margin: 0,
+                color: t4.ink,
+                textShadow: `0 0 12px ${t4.pink}80`,
+              }}
+            >
+              JOIN A WORKSPACE
+            </h1>
+            <p
+              style={{
+                fontFamily: "var(--font-mono-arcade)",
+                fontSize: 11,
+                color: t4.dim,
+                marginTop: 8,
+              }}
+            >
+              Confirm the summon and warp into the workspace.
+            </p>
+          </header>
+
+          <T4Panel label="SUMMON" accent={t4.pink} style={{ position: "relative", padding: 22 }}>
+            {state.kind === "loading" && <Skeleton />}
+            {state.kind === "error" && (
+              <p
+                style={{
+                  textAlign: "center",
+                  fontFamily: "var(--font-mono-arcade)",
+                  fontSize: 12,
+                  color: t4.hp,
+                }}
+              >
+                ⚠ {state.message}
+              </p>
+            )}
+            {state.kind === "ready" && (
+              <InviteBody
+                invite={state.invite}
+                accepting={accepting}
+                acceptError={acceptError}
+                onAccept={handleAccept}
+              />
+            )}
+          </T4Panel>
+
+          <Link
+            href="/workspaces"
+            style={{
+              fontFamily: "var(--font-pixel)",
+              fontSize: 8,
+              letterSpacing: 2,
+              color: t4.dim,
+              textDecoration: "none",
+              textAlign: "center",
+            }}
+          >
+            ▷ MY WORKSPACES
+          </Link>
+        </div>
       </div>
-    </main>
+    </T4Screen>
   );
 }
 
@@ -131,34 +195,89 @@ function InviteBody({
         : invite.expired || invite.status === "EXPIRED"
           ? "만료된 초대입니다."
           : null;
+  const roleColor = invite.role === "ADMIN" ? t4.pink : t4.mp;
 
   return (
-    <>
-      <div className="flex items-start gap-3">
-        <div className="w-10 h-10 rounded-md bg-surface-raised flex items-center justify-center text-text-secondary shrink-0">
-          <Building2 className="w-5 h-5" />
+    <div className="flex flex-col gap-5">
+      <div className="flex items-start gap-4">
+        <div
+          style={{
+            padding: 8,
+            border: `1px solid ${t4.pink}`,
+            background: "rgba(0,0,0,0.4)",
+            boxShadow: `0 0 10px ${t4.pink}50`,
+            flexShrink: 0,
+          }}
+        >
+          <PixelAvatar kind="mira" size={3} />
         </div>
-        <div className="flex flex-col gap-1 min-w-0">
-          <p className="text-title text-text break-words">
-            {invite.workspaceName}
+        <div className="min-w-0 flex flex-col gap-2">
+          <p
+            className="break-words"
+            style={{
+              fontFamily: "var(--font-pixel)",
+              fontSize: 12,
+              letterSpacing: 1.5,
+              color: t4.ink,
+              margin: 0,
+              textShadow: `0 0 6px ${t4.pink}80`,
+            }}
+          >
+            ♦ {invite.workspaceName.toUpperCase()}
           </p>
-          <div className="flex items-center gap-2">
-            <Badge variant={invite.role === "ADMIN" ? "info" : "default"}>
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              style={{
+                fontFamily: "var(--font-pixel)",
+                fontSize: 7,
+                letterSpacing: 1,
+                color: roleColor,
+                padding: "3px 6px",
+                border: `1px solid ${roleColor}`,
+              }}
+            >
               {invite.role}
-            </Badge>
-            <span className="text-micro text-text-dim">
-              만료 {formatDateTime(invite.expiresAt)}
+            </span>
+            <span
+              style={{
+                fontFamily: "var(--font-mono-arcade)",
+                fontSize: 10,
+                color: t4.dim,
+              }}
+            >
+              ⌛ expires {formatDateTime(invite.expiresAt)}
             </span>
           </div>
         </div>
       </div>
 
       {blockedReason && (
-        <p className="text-caption text-danger text-center">{blockedReason}</p>
+        <p
+          style={{
+            fontFamily: "var(--font-mono-arcade)",
+            fontSize: 11,
+            color: t4.hp,
+            textAlign: "center",
+            padding: "10px",
+            border: `1px solid ${t4.hp}`,
+            background: "rgba(255,85,119,0.06)",
+          }}
+        >
+          ⚠ {blockedReason}
+        </p>
       )}
 
       {acceptError && (
-        <p className="text-caption text-danger text-center">{acceptError}</p>
+        <p
+          style={{
+            fontFamily: "var(--font-mono-arcade)",
+            fontSize: 11,
+            color: t4.hp,
+            textAlign: "center",
+          }}
+        >
+          ⚠ {acceptError}
+        </p>
       )}
 
       <Button
@@ -167,23 +286,30 @@ function InviteBody({
         disabled={blocked}
         className="w-full"
       >
-        {blocked ? "수락할 수 없음" : "초대 수락"}
+        {blocked ? "▶ LOCKED" : "▶ ACCEPT SUMMON"}
       </Button>
-    </>
+    </div>
   );
 }
 
 function Skeleton() {
   return (
-    <div className="flex flex-col gap-3 animate-pulse">
-      <div className="flex gap-3">
-        <div className="w-10 h-10 rounded-md bg-surface-raised" />
+    <div className="flex flex-col gap-3" style={{ animation: "t4-pulse 1.4s ease-in-out infinite" }}>
+      <div className="flex gap-4">
+        <div
+          style={{
+            width: 56,
+            height: 56,
+            border: `1px solid ${t4.line}`,
+            background: "rgba(0,0,0,0.3)",
+          }}
+        />
         <div className="flex-1 flex flex-col gap-2">
-          <div className="h-4 bg-surface-raised rounded w-2/3" />
-          <div className="h-3 bg-surface-raised rounded w-1/3" />
+          <div style={{ height: 10, background: "rgba(255,255,255,0.04)", width: "70%" }} />
+          <div style={{ height: 8, background: "rgba(255,255,255,0.04)", width: "40%" }} />
         </div>
       </div>
-      <div className="h-9 bg-surface-raised rounded" />
+      <div style={{ height: 36, background: "rgba(255,255,255,0.04)" }} />
     </div>
   );
 }

@@ -1,32 +1,58 @@
-/* styles/tokens.css — AI Office Design Tokens */
+/* styles/tokens.css — AI Office Design Tokens (t4 arcade RPG palette) */
 
 :root {
-  /* Primary — Teal (Orchestrator / 주요 액션) */
-  --color-primary: #0f766e;
-  --color-primary-light: #22d3ee;
-  --color-primary-hover: #0e7490;
-  --color-primary-muted: rgba(34, 211, 238, 0.16);
+  /* t4 base palette — from public/reference/arcade/rpg.js */
+  --t4-bg: #0b0d18;
+  --t4-bg2: #141828;
+  --t4-panel: #1b2038;
+  --t4-panel-2: #232a47;
+  --t4-ink: #e8ecff;
+  --t4-dim: #7d85b0;
+  --t4-line: #2d365a;
+  --t4-line-soft: #3a4570;
 
-  /* Agent — Amber (Agent 강조색) */
-  --color-agent: #f59e0b;
-  --color-agent-dark: #b45309;
+  /* Stat / accent colors */
+  --t4-hp: #ff5577;
+  --t4-mp: #5aa8ff;
+  --t4-xp: #ffd84a;
+  --t4-ok: #5fe39a;
+  --t4-agent: #9a7aff;
+  --t4-pink: #ff7adc;
+  --t4-orange: #ff9a3a;
 
-  /* Semantic */
-  --color-danger: #dc2626;
-  --color-danger-hover: #b91c1c;
-  --color-danger-bg: #b91c1c;
-  --color-info: #2563eb;
-  --color-success: #16a34a;
-  --color-meeting: #7c3aed;
-  --color-warning: #d97706;
-  --color-working: #0284c7;
-  --color-stalled: #ea580c;
+  /* Neon accent (used for borders / glows) */
+  --neon-pink: #ff7adc;
+  --neon-blue: #5aa8ff;
+  --neon-purple: #9a7aff;
+  --neon-yellow: #ffd84a;
+  --neon-green: #5fe39a;
+  --neon-red: #ff5577;
+  --neon-border: #ff7adc;
+
+  /* Legacy semantic mapping (so existing components keep working) */
+  --color-primary: var(--t4-pink);
+  --color-primary-light: var(--t4-mp);
+  --color-primary-hover: var(--t4-agent);
+  --color-primary-muted: rgba(154, 122, 255, 0.16);
+
+  --color-agent: var(--t4-agent);
+  --color-agent-dark: #6b4ad8;
+
+  --color-danger: var(--t4-hp);
+  --color-danger-hover: #d63d5e;
+  --color-danger-bg: rgba(255, 85, 119, 0.18);
+  --color-info: var(--t4-mp);
+  --color-success: var(--t4-ok);
+  --color-meeting: var(--t4-agent);
+  --color-warning: var(--t4-xp);
+  --color-working: var(--t4-mp);
+  --color-stalled: var(--t4-orange);
 
   /* Text */
-  --text: #17212b;
-  --text-secondary: #34495e;
-  --text-muted: #627386;
-  --text-dim: #8a98a8;
+  --text: var(--t4-ink);
+  --text-secondary: #c5cbed;
+  --text-muted: var(--t4-dim);
+  --text-dim: #5b6390;
 
   /* Spacing aliases */
   --gap-tight: 4px;

@@ -21,14 +21,18 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           <input
             ref={ref}
             className={`
-              w-full px-3 py-2 text-body rounded-md
-              bg-surface border border-[var(--neon-border-muted)] text-text placeholder-text-muted
-              focus:outline-none focus:ring-2 focus:ring-primary-light/50 focus:border-primary-light
+              w-full px-3 py-2 font-arcade-mono text-[12px]
+              focus:outline-none
               disabled:opacity-50 disabled:cursor-not-allowed
               ${icon ? "pl-9" : ""}
-              ${error ? "border-danger" : ""}
               ${className}
             `.trim().replace(/\s+/g, " ")}
+            style={{
+              background: "rgba(10,13,26,0.8)",
+              border: `1px solid ${error ? "var(--t4-hp)" : "var(--t4-line)"}`,
+              color: "var(--t4-ink)",
+              letterSpacing: 0.5,
+            }}
             {...rest}
           />
         </div>
@@ -50,13 +54,16 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
         <textarea
           ref={ref}
           className={`
-            w-full px-3 py-2 text-body rounded-md resize-none
-            bg-surface border border-[var(--neon-border-muted)] text-text placeholder-text-muted
-            focus:outline-none focus:ring-2 focus:ring-primary-light/50 focus:border-primary-light
+            w-full px-3 py-2 font-arcade-mono text-[12px] resize-none
+            focus:outline-none
             disabled:opacity-50 disabled:cursor-not-allowed
-            ${error ? "border-danger" : ""}
             ${className}
           `.trim().replace(/\s+/g, " ")}
+          style={{
+            background: "rgba(10,13,26,0.8)",
+            border: `1px solid ${error ? "var(--t4-hp)" : "var(--t4-line)"}`,
+            color: "var(--t4-ink)",
+          }}
           {...rest}
         />
         {error && <p className="text-danger text-caption mt-1">{error}</p>}

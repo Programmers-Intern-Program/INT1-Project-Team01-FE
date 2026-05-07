@@ -127,11 +127,41 @@ function StatusPill({
 
 export function WorkspaceErrorState({ message }: { message: string }) {
   return (
-    <main className="theme-web flex min-h-screen items-center justify-center px-4">
-      <section className="w-full max-w-md rounded-lg border border-danger/40 bg-surface px-6 py-8 text-center">
-        <p className="text-body text-danger">{message}</p>
+    <main
+      className="theme-web flex min-h-screen items-center justify-center px-4"
+      style={{ background: "var(--t4-bg)" }}
+    >
+      <section
+        className="w-full max-w-md px-6 py-8 text-center"
+        style={{
+          border: "1px solid var(--t4-hp)",
+          background: "rgba(20,28,55,0.92)",
+          boxShadow: "0 0 24px rgba(255,85,119,0.3)",
+        }}
+      >
+        <p
+          style={{
+            fontFamily: "var(--font-pixel)",
+            fontSize: 10,
+            letterSpacing: 2,
+            color: "var(--t4-hp)",
+            textShadow: "0 0 6px var(--t4-hp)",
+            marginBottom: 16,
+          }}
+        >
+          ⚠ ERROR
+        </p>
+        <p
+          style={{
+            fontFamily: "var(--font-mono-arcade)",
+            fontSize: 12,
+            color: "var(--t4-ink)",
+          }}
+        >
+          {message}
+        </p>
         <Link href="/workspaces" className="mt-5 inline-flex">
-          <Button variant="secondary">워크스페이스 목록</Button>
+          <Button variant="secondary">◀ WORKSPACES</Button>
         </Link>
       </section>
     </main>
@@ -140,8 +170,22 @@ export function WorkspaceErrorState({ message }: { message: string }) {
 
 export function WorkspaceLoadingState() {
   return (
-    <main className="theme-web flex min-h-screen items-center justify-center px-4">
-      <div className="h-10 w-10 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+    <main
+      className="theme-web flex min-h-screen items-center justify-center px-4"
+      style={{ background: "var(--t4-bg)" }}
+    >
+      <div
+        style={{
+          fontFamily: "var(--font-pixel)",
+          fontSize: 12,
+          letterSpacing: 3,
+          color: "var(--t4-pink)",
+          textShadow: "0 0 8px var(--t4-pink)",
+          animation: "t4-pulse 1.4s ease-in-out infinite",
+        }}
+      >
+        ◆ LOADING WORLD…
+      </div>
     </main>
   );
 }

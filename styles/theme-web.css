@@ -1,26 +1,85 @@
-/* styles/theme-web.css — Daylight web UI surfaces (Workspace shell, dashboard) */
+/* styles/theme-web.css — arcade RPG dark theme */
 
 .theme-web,
 :root {
-  --bg: #f7fbff;
-  --bg-deep: #e7f3ff;
-  --surface: #ffffff;
-  --surface-raised: #edf5f1;
-  --border: #d7e4de;
-  --border-subtle: #edf2ef;
-  --neon-cyan: #22d3ee;
-  --neon-blue: #60a5fa;
-  --neon-green: #34d399;
-  --neon-violet: #a78bfa;
-  --neon-border: rgba(34, 211, 238, 0.58);
-  --neon-border-muted: rgba(96, 165, 250, 0.32);
-  --shadow-soft: none;
-  --shadow-card: none;
-  --shadow-neon: 0 0 0 1px rgba(34, 211, 238, 0.48);
+  --bg: var(--t4-bg);
+  --bg-deep: #05060d;
+  --surface: var(--t4-panel);
+  --surface-raised: var(--t4-panel-2);
+  --border: var(--t4-line);
+  --border-subtle: var(--t4-line-soft);
+
+  --t4-tile-bg: rgba(20, 28, 55, 0.5);
 }
 
 .theme-web {
-  background:
-    linear-gradient(180deg, rgba(231, 243, 255, 0.95) 0%, rgba(247, 251, 255, 0.86) 34%, #fbfdf8 100%),
-    linear-gradient(120deg, rgba(20, 184, 166, 0.08), rgba(245, 158, 11, 0.08) 58%, rgba(59, 130, 246, 0.06));
+  background: var(--t4-bg);
+  color: var(--text);
+}
+
+/* CRT scanline + vignette overlays for the arcade look */
+.t4-scanlines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.04) 0,
+    rgba(255, 255, 255, 0.04) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  mix-blend-mode: overlay;
+  opacity: 0.55;
+}
+
+.t4-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 55%,
+    rgba(0, 0, 0, 0.55) 100%
+  );
+}
+
+.t4-glow-pink {
+  box-shadow:
+    0 0 0 1px rgba(255, 122, 220, 0.6),
+    0 0 18px rgba(255, 122, 220, 0.35),
+    inset 0 0 12px rgba(255, 122, 220, 0.08);
+}
+
+.t4-glow-blue {
+  box-shadow:
+    0 0 0 1px rgba(90, 168, 255, 0.6),
+    0 0 18px rgba(90, 168, 255, 0.35),
+    inset 0 0 12px rgba(90, 168, 255, 0.08);
+}
+
+.t4-glow-purple {
+  box-shadow:
+    0 0 0 1px rgba(154, 122, 255, 0.6),
+    0 0 18px rgba(154, 122, 255, 0.35),
+    inset 0 0 12px rgba(154, 122, 255, 0.08);
+}
+
+.t4-glow-yellow {
+  box-shadow:
+    0 0 0 1px rgba(255, 216, 74, 0.6),
+    0 0 18px rgba(255, 216, 74, 0.35),
+    inset 0 0 12px rgba(255, 216, 74, 0.08);
+}
+
+.t4-glow-green {
+  box-shadow:
+    0 0 0 1px rgba(95, 227, 154, 0.6),
+    0 0 18px rgba(95, 227, 154, 0.35),
+    inset 0 0 12px rgba(95, 227, 154, 0.08);
+}
+
+.t4-pixel-border {
+  border: 1px solid var(--t4-line);
+  background: linear-gradient(180deg, rgba(27, 32, 56, 0.95), rgba(20, 24, 40, 0.95));
 }

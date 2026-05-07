@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { ArrowLeft, CheckCircle2, Network, Plus, ServerCog } from "lucide-react";
-import { Badge, Button, Card, Input } from "@/components/ui";
+import { Button, Input } from "@/components/ui";
+import { T4Screen, T4Panel } from "@/components/arcade";
+import { t4 } from "@/components/arcade/tokens";
 import { getStoredUser } from "@/lib/api-client";
 
 interface GatewayEntry {
@@ -36,7 +37,7 @@ export default function GatewayPage() {
     queueMicrotask(() => {
       if (cancelled) return;
       if (!getStoredUser()) {
-        router.replace("/auth");
+        router.replace("/");
         return;
       }
       const stored = readGateways();
@@ -93,167 +94,287 @@ export default function GatewayPage() {
     setDisplayName("");
     setGatewayUrl("");
     setToken("");
-    setCreatedMessage("OpenClaw 게이트웨이가 등록되었습니다.");
+    setCreatedMessage("WARP GATE LINKED.");
     setSubmitting(false);
   }
 
   if (!hydrated) return null;
 
   return (
-    <main className="theme-web min-h-screen px-6 py-10">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+    <T4Screen title="GATEWAY · WARP STATIONS">
+      <div
+        style={{
+          padding: "30px 28px",
+          height: "100%",
+          boxSizing: "border-box",
+          display: "flex",
+          flexDirection: "column",
+          gap: 18,
+          maxWidth: 1100,
+          margin: "0 auto",
+          width: "100%",
+        }}
+      >
         <Link
           href="/workspaces"
-          className="inline-flex w-fit items-center gap-1 text-caption text-text-muted hover:text-text"
+          style={{
+            fontFamily: "var(--font-pixel)",
+            fontSize: 8,
+            letterSpacing: 2,
+            color: t4.dim,
+            textDecoration: "none",
+          }}
         >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          워크스페이스 목록
+          ◀ BACK TO WORKPLACES
         </Link>
 
-        <header className="flex flex-col gap-1">
-          <h1 className="text-heading">게이트웨이</h1>
-          <p className="text-body text-text-muted">
-            OpenClaw 게이트웨이를 등록하고 워크스페이스에서 사용할 연결 대상을 확인합니다.
+        <div>
+          <div
+            style={{
+              fontFamily: "var(--font-pixel)",
+              fontSize: 8,
+              color: t4.mp,
+              letterSpacing: 3,
+              marginBottom: 4,
+            }}
+          >
+            ◆ OPENCLAW · WARP NET
+          </div>
+          <h1
+            style={{
+              fontFamily: "var(--font-pixel)",
+              fontSize: 22,
+              letterSpacing: 2,
+              margin: 0,
+              color: t4.ink,
+              textShadow: `0 0 12px ${t4.mp}80`,
+            }}
+          >
+            REGISTER A GATEWAY
+          </h1>
+          <p
+            style={{
+              fontFamily: "var(--font-mono-arcade)",
+              fontSize: 11,
+              color: t4.dim,
+              marginTop: 8,
+            }}
+          >
+            Link an OpenClaw gateway so workplaces can summon agents through it.
           </p>
-        </header>
+        </div>
 
-        <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
-          <aside className="flex flex-col gap-3">
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="text-title text-text">등록된 게이트웨이</h2>
-              <Badge variant="info">{gateways.length}</Badge>
-            </div>
-
-            {gateways.length === 0 ? (
-              <section className="rounded-lg border border-border bg-surface px-4 py-8 text-center">
-                <Network className="mx-auto h-8 w-8 text-text-dim" />
-                <p className="mt-3 text-caption text-text-muted">
-                  아직 등록된 게이트웨이가 없습니다.
+        <div className="grid gap-5 lg:grid-cols-[300px_minmax(0,1fr)]">
+          <aside className="flex flex-col gap-4">
+            <T4Panel label={`LINKED · ${String(gateways.length).padStart(2, "0")}`} accent={t4.mp} style={{ position: "relative", padding: 12 }}>
+              {gateways.length === 0 ? (
+                <p
+                  style={{
+                    fontFamily: "var(--font-mono-arcade)",
+                    fontSize: 11,
+                    color: t4.dim,
+                    padding: "14px 6px",
+                    textAlign: "center",
+                  }}
+                >
+                  ◇ no gateway linked yet
                 </p>
-              </section>
-            ) : (
-              <section className="grid gap-2">
-                {gateways.map((gateway) => (
-                  <button
-                    key={gateway.id}
-                    type="button"
-                    onClick={() => setSelectedId(gateway.id)}
-                    className={[
-                      "rounded-lg border bg-surface p-4 text-left transition-colors",
-                      selectedGateway?.id === gateway.id
-                        ? "border-primary-light ring-2 ring-primary"
-                        : "border-border hover:border-primary-light",
-                    ].join(" ")}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="truncate text-body font-semibold text-text">
-                        {gateway.displayName}
-                      </p>
-                      <Badge variant="success">등록됨</Badge>
-                    </div>
-                    <p className="mt-2 truncate text-caption text-text-muted">
-                      {gateway.gatewayUrl}
-                    </p>
-                    <p className="mt-2 text-micro text-text-dim">
-                      {formatDateTime(gateway.createdAt)}
-                    </p>
-                  </button>
-                ))}
-              </section>
-            )}
+              ) : (
+                <div className="grid gap-2">
+                  {gateways.map((gateway) => {
+                    const active = selectedGateway?.id === gateway.id;
+                    return (
+                      <button
+                        key={gateway.id}
+                        type="button"
+                        onClick={() => setSelectedId(gateway.id)}
+                        style={{
+                          padding: "10px 12px",
+                          textAlign: "left",
+                          background: active ? "rgba(90,168,255,0.08)" : "rgba(0,0,0,0.3)",
+                          border: `1px solid ${active ? t4.mp : t4.line}`,
+                          boxShadow: active ? `0 0 10px ${t4.mp}40` : "none",
+                          cursor: "pointer",
+                          color: t4.ink,
+                        }}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span
+                            className="truncate"
+                            style={{
+                              fontFamily: "var(--font-pixel)",
+                              fontSize: 9,
+                              letterSpacing: 1.5,
+                              color: active ? t4.mp : t4.ink,
+                            }}
+                          >
+                            ♦ {gateway.displayName.toUpperCase()}
+                          </span>
+                          <span
+                            style={{
+                              fontFamily: "var(--font-pixel)",
+                              fontSize: 7,
+                              letterSpacing: 1,
+                              color: t4.ok,
+                              border: `1px solid ${t4.ok}`,
+                              padding: "2px 5px",
+                            }}
+                          >
+                            ON
+                          </span>
+                        </div>
+                        <p
+                          className="mt-2 truncate"
+                          style={{
+                            fontFamily: "var(--font-mono-arcade)",
+                            fontSize: 10,
+                            color: t4.dim,
+                          }}
+                        >
+                          {gateway.gatewayUrl}
+                        </p>
+                        <p
+                          className="mt-1"
+                          style={{
+                            fontFamily: "var(--font-mono-arcade)",
+                            fontSize: 9,
+                            color: t4.dim,
+                          }}
+                        >
+                          ◆ {formatDateTime(gateway.createdAt)}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </T4Panel>
 
             {selectedGateway && (
-              <Card className="p-4">
-                <div className="flex items-start gap-3">
-                  <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-success" />
-                  <div className="min-w-0">
-                    <p className="text-caption font-semibold text-text">선택된 게이트웨이</p>
-                    <p className="mt-1 truncate text-body text-text">{selectedGateway.displayName}</p>
-                    <p className="mt-1 truncate text-micro text-text-muted">
-                      Token {selectedGateway.maskedToken}
-                    </p>
-                  </div>
-                </div>
-              </Card>
+              <T4Panel label="ACTIVE LINK" accent={t4.ok} style={{ position: "relative", padding: 14 }}>
+                <p
+                  style={{
+                    fontFamily: "var(--font-pixel)",
+                    fontSize: 8,
+                    color: t4.dim,
+                    letterSpacing: 2,
+                  }}
+                >
+                  TARGET
+                </p>
+                <p
+                  className="mt-2 truncate"
+                  style={{
+                    fontFamily: "var(--font-pixel)",
+                    fontSize: 11,
+                    color: t4.ok,
+                    letterSpacing: 1.5,
+                    textShadow: `0 0 6px ${t4.ok}`,
+                  }}
+                >
+                  {selectedGateway.displayName.toUpperCase()}
+                </p>
+                <p
+                  className="mt-3"
+                  style={{
+                    fontFamily: "var(--font-mono-arcade)",
+                    fontSize: 10,
+                    color: t4.dim,
+                  }}
+                >
+                  TOKEN · {selectedGateway.maskedToken}
+                </p>
+              </T4Panel>
             )}
           </aside>
 
-          <section className="flex flex-col gap-5">
-            <Card className="p-6">
-              <div className="flex flex-col gap-1">
-                <h2 className="text-heading">게이트 웨이 등록</h2>
-                <p className="text-body text-text-muted">
-                  OpenClaw 게이트웨이 등록
+          <T4Panel label="GATE FORM" accent={t4.mp} style={{ position: "relative", padding: 22 }}>
+            <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+              <Field
+                label="DISPLAY NAME"
+                required
+                counter={`${displayName.length}/${DISPLAY_NAME_MAX}`}
+              >
+                <Input
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  maxLength={DISPLAY_NAME_MAX}
+                  placeholder="e.g. local openclaw gateway"
+                  disabled={submitting}
+                  autoFocus
+                />
+              </Field>
+
+              <Field
+                label="GATEWAY URL"
+                required
+                counter={`${gatewayUrl.length}/${URL_MAX}`}
+              >
+                <Input
+                  value={gatewayUrl}
+                  onChange={(e) => setGatewayUrl(e.target.value)}
+                  maxLength={URL_MAX}
+                  placeholder="http://localhost:4317"
+                  disabled={submitting}
+                />
+              </Field>
+
+              <Field label="TOKEN" required>
+                <Input
+                  type="password"
+                  value={token}
+                  onChange={(e) => setToken(e.target.value)}
+                  placeholder="openclaw gateway token"
+                  disabled={submitting}
+                />
+              </Field>
+
+              {error && (
+                <p
+                  style={{
+                    fontFamily: "var(--font-mono-arcade)",
+                    fontSize: 11,
+                    color: t4.hp,
+                  }}
+                >
+                  ⚠ {error}
                 </p>
-              </div>
-
-              <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-5">
-                <Field
-                  label="표시 이름"
-                  required
-                  counter={`${displayName.length}/${DISPLAY_NAME_MAX}`}
+              )}
+              {createdMessage && !error && (
+                <p
+                  style={{
+                    fontFamily: "var(--font-pixel)",
+                    fontSize: 8,
+                    letterSpacing: 2,
+                    color: t4.ok,
+                    textShadow: `0 0 6px ${t4.ok}`,
+                  }}
                 >
-                  <Input
-                    value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
-                    maxLength={DISPLAY_NAME_MAX}
-                    placeholder="예) 로컬 OpenClaw Gateway"
-                    disabled={submitting}
-                    autoFocus
-                  />
-                </Field>
+                  ★ {createdMessage}
+                </p>
+              )}
 
-                <Field
-                  label="OpenClaw 게이트웨이 URL"
-                  required
-                  counter={`${gatewayUrl.length}/${URL_MAX}`}
-                >
-                  <Input
-                    value={gatewayUrl}
-                    onChange={(e) => setGatewayUrl(e.target.value)}
-                    maxLength={URL_MAX}
-                    placeholder="예) http://localhost:4317"
-                    disabled={submitting}
-                  />
-                </Field>
-
-                <Field label="토큰" required>
-                  <Input
-                    type="password"
-                    value={token}
-                    onChange={(e) => setToken(e.target.value)}
-                    placeholder="OpenClaw gateway token"
-                    disabled={submitting}
-                  />
-                </Field>
-
-                {error && <p className="text-caption text-danger">{error}</p>}
-                {createdMessage && !error && (
-                  <p className="text-caption text-success">{createdMessage}</p>
-                )}
-
-                <div className="flex items-center justify-end gap-2">
-                  <Link href="/workspaces">
-                    <Button type="button" variant="ghost" disabled={submitting}>
-                      취소
-                    </Button>
-                  </Link>
-                  <Button type="submit" icon={<Plus />} loading={submitting}>
-                    생성
+              <div className="flex items-center justify-end gap-2">
+                <Link href="/workspaces">
+                  <Button type="button" variant="ghost" disabled={submitting}>
+                    CANCEL
                   </Button>
-                </div>
-              </form>
-            </Card>
+                </Link>
+                <Button type="submit" loading={submitting}>
+                  ▶ LINK GATE
+                </Button>
+              </div>
+            </form>
+          </T4Panel>
+        </div>
 
-            <section className="grid gap-3 md:grid-cols-3">
-              <InfoCard title="등록" description="표시 이름, URL, 토큰을 입력해 게이트웨이를 추가합니다." />
-              <InfoCard title="확인" description="왼쪽 사이드바에서 등록된 게이트웨이를 확인합니다." />
-              <InfoCard title="연결" description="Workspace 단위 연결 API가 준비되면 여기서 바인딩합니다." />
-            </section>
-          </section>
+        <div className="grid gap-3 md:grid-cols-3">
+          <InfoCard step="01" title="REGISTER" description="Type a label, gateway URL, and token to add a station." />
+          <InfoCard step="02" title="VERIFY" description="The sidebar lists every linked gateway with its status." />
+          <InfoCard step="03" title="BIND" description="Workspace-level binding ships when the API lands." />
         </div>
       </div>
-    </main>
+    </T4Screen>
   );
 }
 
@@ -269,26 +390,80 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <label className="flex flex-col gap-1.5">
-      <span className="flex items-center justify-between text-caption text-text-secondary">
-        <span>
-          {label}
-          {required && <span className="ml-0.5 text-danger">*</span>}
+    <label className="flex flex-col gap-2">
+      <span className="flex items-center justify-between">
+        <span
+          style={{
+            fontFamily: "var(--font-pixel)",
+            fontSize: 8,
+            letterSpacing: 2,
+            color: t4.dim,
+          }}
+        >
+          ◇ {label}
+          {required && <span style={{ color: t4.hp, marginLeft: 4 }}>*</span>}
         </span>
-        {counter && <span className="text-micro text-text-dim">{counter}</span>}
+        {counter && (
+          <span
+            style={{
+              fontFamily: "var(--font-mono-arcade)",
+              fontSize: 9,
+              color: t4.dim,
+            }}
+          >
+            {counter}
+          </span>
+        )}
       </span>
       {children}
     </label>
   );
 }
 
-function InfoCard({ title, description }: { title: string; description: string }) {
+function InfoCard({
+  step,
+  title,
+  description,
+}: {
+  step: string;
+  title: string;
+  description: string;
+}) {
   return (
-    <Card className="p-4">
-      <ServerCog className="h-5 w-5 text-primary" />
-      <p className="mt-3 text-caption font-semibold text-text">{title}</p>
-      <p className="mt-1 text-caption text-text-muted">{description}</p>
-    </Card>
+    <T4Panel accent={t4.agent} style={{ position: "relative", padding: 14 }}>
+      <p
+        style={{
+          fontFamily: "var(--font-pixel)",
+          fontSize: 7,
+          letterSpacing: 2,
+          color: t4.agent,
+        }}
+      >
+        STEP {step}
+      </p>
+      <p
+        className="mt-2"
+        style={{
+          fontFamily: "var(--font-pixel)",
+          fontSize: 10,
+          letterSpacing: 1.5,
+          color: t4.ink,
+        }}
+      >
+        ▸ {title}
+      </p>
+      <p
+        className="mt-2"
+        style={{
+          fontFamily: "var(--font-mono-arcade)",
+          fontSize: 11,
+          color: t4.dim,
+          lineHeight: 1.5,
+        }}
+      >
+        {description}
+      </p>
+    </T4Panel>
   );
 }
 

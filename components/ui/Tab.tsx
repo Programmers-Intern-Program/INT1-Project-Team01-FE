@@ -28,7 +28,7 @@ export default function Tab({ tabs, activeKey, onChange, className = "" }: TabPr
             className={`
               flex-1 py-1.5 text-caption text-center flex items-center justify-center gap-1
               ${isActive
-                ? "text-primary-light border-b-2 border-primary-light font-bold"
+                ? "text-primary border-b-2 border-primary-light font-bold"
                 : "text-text-muted"
               }
             `.trim().replace(/\s+/g, " ")}

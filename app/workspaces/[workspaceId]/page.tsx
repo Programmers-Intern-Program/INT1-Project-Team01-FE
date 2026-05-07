@@ -2,33 +2,32 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { use, useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent, type ReactNode } from "react";
 import {
   ArrowLeft,
   Bell,
   Bot,
   CheckCircle2,
-  Clipboard,
   GitBranch,
   KeyRound,
   ListChecks,
   MessageCircle,
+  Plug,
   Plus,
   Send,
   Settings,
   ShieldAlert,
   UserPlus,
-  Users,
 } from "lucide-react";
-import { Badge, Button, Input, Modal } from "@/components/ui";
-import OfficePhaserGame from "@/components/workspace/OfficePhaserGame";
+import { Button, Input, Modal } from "@/components/ui";
+import { T4Panel, PixelAvatar, type PixelAvatarKind } from "@/components/arcade";
+import { t4 } from "@/components/arcade/tokens";
 import {
   WorkspaceErrorState,
   WorkspaceLoadingState,
 } from "@/components/workspace/WorkspaceShell";
 import type { OfficeAgentState } from "@/game/office/EventBus";
 import { getStoredUser, type ApiError } from "@/lib/api-client";
-import { createInviteLink } from "@/lib/api/invites";
 import {
   createSlackIntegration,
   type SlackIntegration,
@@ -40,12 +39,10 @@ import {
   type WorkspaceTask,
 } from "@/lib/api/tasks";
 import {
-  deleteWorkspace,
   getWorkspace,
   listWorkspaceMembers,
   type WorkspaceDetail,
   type WorkspaceMember,
-  type WorkspaceRole,
 } from "@/lib/api/workspaces";
 
 type LoadState =
@@ -78,6 +75,16 @@ interface ActorContextMenu {
   actor: OfficeActor;
   x: number;
   y: number;
+}
+
+interface StagePan {
+  x: number;
+  y: number;
+}
+
+interface StageSize {
+  width: number;
+  height: number;
 }
 
 const STATUS_META: Record<
@@ -169,21 +176,10 @@ export default function WorkspaceOfficePage({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tasksOpen, setTasksOpen] = useState(false);
   const [agentHireOpen, setAgentHireOpen] = useState(false);
-  const [workspaceOpen, setWorkspaceOpen] = useState(false);
-  const [inviteOpen, setInviteOpen] = useState(false);
   const [discordOpen, setDiscordOpen] = useState(false);
   const [githubOpen, setGithubOpen] = useState(false);
   const [slackOpen, setSlackOpen] = useState(false);
   const [openClawOpen, setOpenClawOpen] = useState(false);
-
-  const [emailInviteUrl, setEmailInviteUrl] = useState("");
-  const [linkInviteUrl, setLinkInviteUrl] = useState("");
-  const [inviteError, setInviteError] = useState("");
-  const [inviteBusy, setInviteBusy] = useState(false);
-  const [copiedInviteKind, setCopiedInviteKind] = useState<"email" | "link" | null>(null);
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<WorkspaceRole>("MEMBER");
-  const [inviteExpiresInDays, setInviteExpiresInDays] = useState(7);
 
   const [slackTeamId, setSlackTeamId] = useState("");
   const [slackChannelId, setSlackChannelId] = useState("");
@@ -199,6 +195,10 @@ export default function WorkspaceOfficePage({
   const [skillProfile, setSkillProfile] = useState("default");
   const [agentHireError, setAgentHireError] = useState("");
   const [actorMenu, setActorMenu] = useState<ActorContextMenu | null>(null);
+  const [selectedActorId, setSelectedActorId] = useState<string | null>(null);
+  const [stageZoom, setStageZoom] = useState(1);
+  const [stagePan, setStagePan] = useState<StagePan>({ x: 0, y: 0 });
+  const [stageSize, setStageSize] = useState<StageSize>({ width: 1, height: 1 });
   const [chatTarget, setChatTarget] = useState<OfficeActor | null>(null);
   const [chatInput, setChatInput] = useState("");
   const [chatMessages, setChatMessages] = useState<Record<string, ChatMessage[]>>({});
@@ -209,9 +209,6 @@ export default function WorkspaceOfficePage({
   const [taskDescription, setTaskDescription] = useState("");
   const [taskSubmitting, setTaskSubmitting] = useState(false);
   const [taskCreateError, setTaskCreateError] = useState("");
-  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [deleteWorkspaceBusy, setDeleteWorkspaceBusy] = useState(false);
-  const [deleteWorkspaceError, setDeleteWorkspaceError] = useState("");
 
   const refreshTasks = useCallback(async () => {
     setTasksBusy(true);
@@ -230,12 +227,13 @@ export default function WorkspaceOfficePage({
   useEffect(() => {
     let cancelled = false;
     queueMicrotask(() => {
-      if (!getStoredUser()) {
-        setState({ kind: "error", message: "로그인이 필요합니다." });
+      if (!getStoredUser() && !cancelled) {
+        router.replace("/");
       }
     });
 
     (async () => {
+      if (!getStoredUser()) return;
       try {
         const [workspace, members, initialTasks] = await Promise.all([
           getWorkspace(id),
@@ -261,7 +259,7 @@ export default function WorkspaceOfficePage({
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, router]);
 
   useEffect(() => {
     if (!actorMenu) return;
@@ -295,59 +293,19 @@ export default function WorkspaceOfficePage({
     return [...agentActors, ...memberActors].slice(0, OFFICE_DESK_CAPACITY);
   }, [hiredAgents, state]);
 
+  const selectedActor = useMemo(
+    () => actors.find((actor) => String(actor.id) === selectedActorId) ?? null,
+    [actors, selectedActorId],
+  );
+  const agentCount = actors.filter((actor) => actor.kind === "agent").length;
+  const stageRooms = useMemo(() => getStageRooms(actors.length), [actors.length]);
+
   if (state.kind === "loading") return <WorkspaceLoadingState />;
   if (state.kind === "error") return <WorkspaceErrorState message={state.message} />;
 
   const workingCount = actors.filter((actor) => actor.status === "working").length;
   const adminCount = state.members.filter((member) => member.role === "ADMIN").length;
   const isAdmin = state.workspace.myRole === "ADMIN";
-
-  async function handleCreateInvite(e: FormEvent) {
-    e.preventDefault();
-    const targetEmail = inviteEmail.trim();
-    if (!targetEmail) {
-      setInviteError("초대할 이메일을 입력하세요.");
-      return;
-    }
-    await createInvite({ targetEmail, kind: "email" });
-  }
-
-  async function handleCreateInviteLinkOnly() {
-    await createInvite({ kind: "link" });
-  }
-
-  async function createInvite({
-    targetEmail,
-    kind,
-  }: {
-    targetEmail?: string;
-    kind: "email" | "link";
-  }) {
-    setInviteError("");
-    setCopiedInviteKind(null);
-    setInviteBusy(true);
-    try {
-      const invite = await createInviteLink(id, {
-        expiresInDays: inviteExpiresInDays,
-        role: inviteRole,
-        ...(targetEmail ? { targetEmail } : {}),
-      });
-      const frontendUrl = `${window.location.origin}/invites/${invite.token}`;
-      if (kind === "email") setEmailInviteUrl(frontendUrl);
-      else setLinkInviteUrl(frontendUrl);
-      try {
-        await window.navigator.clipboard?.writeText(frontendUrl);
-        setCopiedInviteKind(kind);
-      } catch {
-        setCopiedInviteKind(null);
-      }
-    } catch (err) {
-      const apiErr = err as ApiError;
-      setInviteError(apiErr?.message ?? "초대 링크 생성에 실패했습니다.");
-    } finally {
-      setInviteBusy(false);
-    }
-  }
 
   async function handleSlackSubmit(e: FormEvent) {
     e.preventDefault();
@@ -497,21 +455,6 @@ export default function WorkspaceOfficePage({
     }
   }
 
-  async function handleDeleteWorkspace() {
-    if (!isAdmin) return;
-    setDeleteWorkspaceBusy(true);
-    setDeleteWorkspaceError("");
-    try {
-      await deleteWorkspace(id);
-      router.replace("/workspaces");
-    } catch (err) {
-      const apiErr = err as ApiError;
-      setDeleteWorkspaceError(apiErr?.message ?? "워크스페이스 삭제에 실패했습니다.");
-    } finally {
-      setDeleteWorkspaceBusy(false);
-    }
-  }
-
   async function submitTask(body: {
     title: string;
     description?: string;
@@ -541,27 +484,53 @@ export default function WorkspaceOfficePage({
   }
 
   return (
-    <main className="theme-web flex h-screen min-h-[620px] flex-col overflow-hidden bg-[#dff1f6] text-text">
+    <main
+      className="theme-web flex h-screen min-h-[620px] flex-col overflow-hidden"
+      style={{ background: t4.bg, color: t4.ink }}
+    >
       <GameTopNav
         workspace={state.workspace}
-        onSettings={() => setSettingsOpen(true)}
+        onConnections={() => setSettingsOpen(true)}
         onTasks={() => setTasksOpen(true)}
         onHireAgent={() => setAgentHireOpen(true)}
       />
 
-      <section className="relative flex-1 overflow-hidden bg-[#dff1f6]">
+      <section className="relative flex-1 overflow-hidden">
         <Skyline />
-        <div className="absolute right-4 top-4 z-30 grid w-[180px] gap-2 sm:w-[210px]">
-          <HudMetric label="Members" value={state.members.length} detail={`ADMIN ${adminCount}`} />
-          <HudMetric label="Working" value={workingCount} detail={`${actors.length} seats`} />
-        </div>
 
-        <div className="absolute inset-x-4 bottom-16 top-8 z-10 overflow-hidden rounded-lg border-4 border-[#9fc3bd] bg-[#f7e8c7] shadow-[0_22px_50px_rgba(73,102,108,0.22)] sm:inset-x-8 sm:bottom-20 lg:inset-x-16 xl:inset-x-24">
-          <OfficePhaserGame
-            agents={actors}
-            onAgentContextMenu={({ agent, x, y }) => setActorMenu({ actor: agent, x, y })}
-          />
-        </div>
+        <ArcadeOfficeStage
+          actors={actors}
+          rooms={stageRooms}
+          selectedActorId={selectedActorId}
+          zoom={stageZoom}
+          pan={stagePan}
+          onPanChange={setStagePan}
+          onSizeChange={setStageSize}
+          onActorSelect={(actor) => {
+            setSelectedActorId(String(actor.id));
+            setActorMenu(null);
+          }}
+          onActorContextMenu={({ actor, x, y }) => setActorMenu({ actor, x, y })}
+        />
+
+        <HeroHud
+          name={getStoredUser()?.name ?? "HERO"}
+          memberCount={state.members.length}
+          workingCount={workingCount}
+        />
+        <MapHud
+          rooms={getStageMiniMapRooms(stageRooms, agentCount)}
+          totalActors={actors.length}
+          zoom={stageZoom}
+          pan={stagePan}
+          stageSize={stageSize}
+        />
+        <MapZoomControls
+          zoom={stageZoom}
+          onZoomOut={() => setStageZoom((value) => clampStageZoom(value - STAGE_ZOOM_STEP))}
+          onReset={() => setStageZoom(1)}
+          onZoomIn={() => setStageZoom((value) => clampStageZoom(value + STAGE_ZOOM_STEP))}
+        />
 
         <ActorContextMenu
           menu={actorMenu}
@@ -588,28 +557,14 @@ export default function WorkspaceOfficePage({
           }}
         />
 
-        <div className="absolute inset-x-0 bottom-0 z-20 flex items-center justify-center bg-gradient-to-t from-[#8cb7b5]/45 to-transparent px-4 pb-4 pt-14">
-          <div className="flex max-w-full items-center gap-2 overflow-x-auto rounded-lg border border-[var(--neon-border-muted)] bg-surface/90 px-3 py-2 scrollbar-hide">
-            {actors.map((actor) => {
-              const meta = STATUS_META[actor.status];
-              return (
-                <span
-                  key={actor.id}
-                  className="inline-flex shrink-0 items-center gap-2 rounded-md bg-surface-raised px-3 py-1.5"
-                >
-                  <span className={`h-2 w-2 rounded-full ${meta.dotClassName}`} />
-                  <span className="text-caption font-semibold text-text">{actor.name}</span>
-                  <span className={`rounded-full px-2 py-0.5 text-micro font-semibold ${meta.className}`}>
-                    {meta.label}
-                  </span>
-                </span>
-              );
-            })}
-            {actors.length === 0 && (
-              <span className="text-caption text-text-muted">채널 설정에서 회원을 초대하세요.</span>
-            )}
-          </div>
-        </div>
+        <DialogueBox
+          actors={actors}
+          selectedActor={selectedActor}
+          adminCount={adminCount}
+          onTalk={openActorChat}
+          onTasks={() => setTasksOpen(true)}
+          onHire={() => setAgentHireOpen(true)}
+        />
       </section>
 
       <SettingsSelectModal
@@ -630,10 +585,6 @@ export default function WorkspaceOfficePage({
         onOpenClaw={() => {
           setSettingsOpen(false);
           setOpenClawOpen(true);
-        }}
-        onChannelSettings={() => {
-          setSettingsOpen(false);
-          setWorkspaceOpen(true);
         }}
       />
       <TaskDashboardModal
@@ -658,56 +609,6 @@ export default function WorkspaceOfficePage({
         onSkillProfileChange={setSkillProfile}
         error={agentHireError}
         onSubmit={handleHireAgent}
-      />
-      <WorkspaceInfoModal
-        open={workspaceOpen}
-        onClose={() => setWorkspaceOpen(false)}
-        workspace={state.workspace}
-        members={state.members}
-        actors={actors}
-        adminCount={adminCount}
-        workingCount={workingCount}
-        isAdmin={isAdmin}
-        deleteBusy={deleteWorkspaceBusy}
-        onDelete={() => {
-          setDeleteWorkspaceError("");
-          setDeleteConfirmOpen(true);
-        }}
-        onInvite={() => {
-          setWorkspaceOpen(false);
-          setInviteOpen(true);
-        }}
-      />
-      <DeleteWorkspaceConfirmModal
-        open={deleteConfirmOpen}
-        workspaceName={state.workspace.name}
-        error={deleteWorkspaceError}
-        deleting={deleteWorkspaceBusy}
-        onClose={() => {
-          if (deleteWorkspaceBusy) return;
-          setDeleteConfirmOpen(false);
-          setDeleteWorkspaceError("");
-        }}
-        onConfirm={handleDeleteWorkspace}
-      />
-      <InviteMemberModal
-        open={inviteOpen}
-        onClose={() => setInviteOpen(false)}
-        email={inviteEmail}
-        onEmailChange={setInviteEmail}
-        role={inviteRole}
-        onRoleChange={setInviteRole}
-        expiresInDays={inviteExpiresInDays}
-        onExpiresInDaysChange={setInviteExpiresInDays}
-        emailInviteUrl={emailInviteUrl}
-        linkInviteUrl={linkInviteUrl}
-        error={inviteError}
-        copiedInviteKind={copiedInviteKind}
-        submitting={inviteBusy}
-        isAdmin={isAdmin}
-        onSubmit={handleCreateInvite}
-        onCreateLinkOnly={handleCreateInviteLinkOnly}
-        onCopy={(inviteUrl, kind) => copyInviteUrl(inviteUrl, kind, setCopiedInviteKind)}
       />
       <SlackIntegrationModal
         open={slackOpen}
@@ -760,43 +661,531 @@ export default function WorkspaceOfficePage({
 
 function GameTopNav({
   workspace,
-  onSettings,
+  onConnections,
   onTasks,
   onHireAgent,
 }: {
   workspace: WorkspaceDetail;
-  onSettings: () => void;
+  onConnections: () => void;
   onTasks: () => void;
   onHireAgent: () => void;
 }) {
   return (
-    <header className="z-40 flex h-14 shrink-0 items-center justify-between gap-3 border-b border-[var(--neon-border-muted)] bg-surface/95 px-4">
+    <header
+      className="z-40 flex h-14 shrink-0 items-center justify-between gap-3 px-4"
+      style={{
+        background: "linear-gradient(180deg, rgba(90,168,255,0.08), rgba(20,24,40,0.95))",
+        borderBottom: `1px solid ${t4.line}`,
+      }}
+    >
       <div className="flex min-w-0 items-center gap-3">
         <Link
           href="/workspaces"
-          className="hidden text-caption font-semibold text-text-muted hover:text-text sm:inline"
+          className="hidden sm:inline"
+          style={{
+            fontFamily: "var(--font-pixel)",
+            fontSize: 8,
+            letterSpacing: 2,
+            color: t4.dim,
+            textDecoration: "none",
+          }}
         >
-          Workspaces
+          ◀ WORKSPACES
         </Link>
-        <span className="hidden h-4 w-px bg-border sm:block" />
+        <span style={{ color: t4.line }}>·</span>
         <div className="min-w-0">
-          <p className="truncate text-title text-text">{workspace.name}</p>
-          <p className="truncate text-micro text-text-dim">2D Workspace</p>
+          <p
+            className="truncate"
+            style={{
+              fontFamily: "var(--font-pixel)",
+              fontSize: 11,
+              letterSpacing: 1.5,
+              color: t4.ink,
+              textShadow: `0 0 8px ${t4.pink}80`,
+            }}
+          >
+            ♦ {workspace.name.toUpperCase()}
+          </p>
+          <p
+            className="truncate"
+            style={{
+              fontFamily: "var(--font-mono-arcade)",
+              fontSize: 9,
+              color: t4.dim,
+              letterSpacing: 1,
+              marginTop: 2,
+            }}
+          >
+            WORLD · FLOOR 01 · {workspace.workspaceId}
+          </p>
         </div>
       </div>
 
-      <nav className="flex shrink-0 items-center gap-1 overflow-x-auto scrollbar-hide sm:gap-2">
-        <Button size="sm" variant="primary" icon={<Bot />} onClick={onHireAgent}>
-          Agent 출근
-        </Button>
-        <Button size="sm" variant="secondary" icon={<Settings />} onClick={onSettings}>
-          채널 설정
-        </Button>
-        <Button size="sm" variant="ghost" icon={<ListChecks />} onClick={onTasks}>
-          태스크
-        </Button>
+      <nav className="flex shrink-0 items-center gap-2 overflow-x-auto scrollbar-hide">
+        <ArcadeNavButton color={t4.pink} primary onClick={onHireAgent} icon={<Bot className="h-3.5 w-3.5" />}>
+          AGENT
+        </ArcadeNavButton>
+        <ArcadeNavButton color={t4.mp} onClick={onConnections} icon={<Plug className="h-3.5 w-3.5" />}>
+          LINK
+        </ArcadeNavButton>
+        <Link href={`/workspaces/${workspace.workspaceId}/settings`}>
+          <ArcadeNavButton color={t4.agent} icon={<Settings className="h-3.5 w-3.5" />}>
+            WORKSPACE
+          </ArcadeNavButton>
+        </Link>
+        <ArcadeNavButton color={t4.xp} onClick={onTasks} icon={<ListChecks className="h-3.5 w-3.5" />}>
+          QUESTS
+        </ArcadeNavButton>
       </nav>
     </header>
+  );
+}
+
+function ArcadeNavButton({
+  children,
+  color,
+  primary,
+  icon,
+  onClick,
+}: {
+  children: React.ReactNode;
+  color: string;
+  primary?: boolean;
+  icon?: React.ReactNode;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        fontFamily: "var(--font-pixel)",
+        fontSize: 8,
+        letterSpacing: 1.5,
+        padding: "7px 11px",
+        background: primary ? color : "transparent",
+        color: primary ? "#000" : color,
+        border: `1px solid ${color}`,
+        boxShadow: primary ? `0 0 12px ${color}` : `0 0 4px ${color}30`,
+        cursor: "pointer",
+        textTransform: "uppercase",
+      }}
+    >
+      {icon}
+      {children}
+    </button>
+  );
+}
+
+interface StageRoomSpec {
+  label: string;
+  left: string;
+  top: string;
+  width: string;
+  height: string;
+  color: string;
+  variant: "engineering" | "huddle" | "lounge" | "library";
+}
+
+interface MiniMapRoom {
+  color: string;
+  label: string;
+  x: string;
+  y: string;
+  w: string;
+  h: string;
+  count: number;
+}
+
+interface StageActorPosition {
+  left: string;
+  top: string;
+}
+
+function ArcadeOfficeStage({
+  actors,
+  rooms,
+  selectedActorId,
+  zoom,
+  pan,
+  onPanChange,
+  onSizeChange,
+  onActorContextMenu,
+  onActorSelect,
+}: {
+  actors: OfficeActor[];
+  rooms: StageRoomSpec[];
+  selectedActorId: string | null;
+  zoom: number;
+  pan: StagePan;
+  onPanChange: (pan: StagePan) => void;
+  onSizeChange: (size: StageSize) => void;
+  onActorContextMenu: (payload: { actor: OfficeActor; x: number; y: number }) => void;
+  onActorSelect: (actor: OfficeActor) => void;
+}) {
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const [drag, setDrag] = useState<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const node = stageRef.current;
+    if (!node) return;
+    const updateSize = () => {
+      onSizeChange({
+        width: Math.max(1, node.clientWidth),
+        height: Math.max(1, node.clientHeight),
+      });
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [onSizeChange]);
+
+  function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    const target = event.target as HTMLElement;
+    if (target.closest("button")) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDrag({
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: pan.x,
+      originY: pan.y,
+    });
+  }
+
+  function handlePointerMove(event: PointerEvent<HTMLDivElement>) {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    onPanChange({
+      x: drag.originX + event.clientX - drag.startX,
+      y: drag.originY + event.clientY - drag.startY,
+    });
+  }
+
+  function handlePointerEnd(event: PointerEvent<HTMLDivElement>) {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    setDrag(null);
+  }
+
+  return (
+    <div
+      ref={stageRef}
+      className="absolute inset-0 z-10 overflow-hidden"
+      style={{
+        background: "#090b16",
+        cursor: drag ? "grabbing" : "grab",
+        touchAction: "none",
+      }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerEnd}
+      onPointerCancel={handlePointerEnd}
+    >
+      <div
+        className="absolute inset-0"
+        style={{
+          transform: `translate3d(${pan.x}px, ${pan.y}px, 0)`,
+          transition: drag ? "none" : "transform 160ms ease-out",
+        }}
+      >
+        <div
+          className="absolute inset-0"
+          style={{
+          transform: `scale(${zoom})`,
+          transformOrigin: "50% 50%",
+          transition: drag ? "none" : "transform 160ms ease-out",
+        }}
+      >
+        <div
+          className="absolute inset-0"
+          style={{
+            backgroundImage:
+              "linear-gradient(rgba(154,122,255,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(154,122,255,0.08) 1px, transparent 1px)",
+            backgroundSize: "22px 22px",
+          }}
+        />
+
+        {rooms.map((room) => (
+          <StageRoom key={room.label} room={room} />
+        ))}
+
+        <QuestMarker />
+
+        {actors.map((actor, index) => {
+          const position = STAGE_ACTOR_POSITIONS[index % STAGE_ACTOR_POSITIONS.length];
+          return (
+            <StageActor
+              key={actor.id}
+              actor={actor}
+              position={position}
+              selected={String(actor.id) === selectedActorId}
+              onSelect={onActorSelect}
+              onContextMenu={onActorContextMenu}
+            />
+          );
+        })}
+
+        {actors.length === 0 && (
+          <div
+            className="absolute left-1/2 top-1/2 w-[min(360px,calc(100%-48px))] -translate-x-1/2 -translate-y-1/2 px-5 py-4 text-center"
+            style={{
+              border: `1px solid ${t4.agent}`,
+              background: "rgba(20,28,55,0.94)",
+              boxShadow: `0 0 18px ${t4.agent}35`,
+            }}
+          >
+            <p
+              style={{
+                fontFamily: "var(--font-pixel)",
+                fontSize: 10,
+                letterSpacing: 1.5,
+                color: t4.agent,
+                textShadow: `0 0 8px ${t4.agent}`,
+              }}
+            >
+              NO WORKSPACE MEMBERS ON FLOOR
+            </p>
+            <p
+              className="mt-2"
+              style={{
+                fontFamily: "var(--font-mono-arcade)",
+                fontSize: 11,
+                color: t4.dim,
+                lineHeight: 1.5,
+              }}
+            >
+              AGENT 버튼에서 Agent를 고용하거나 WORKSPACE에서 멤버를 초대하세요.
+            </p>
+          </div>
+        )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StageRoom({
+  room,
+}: {
+  room: StageRoomSpec;
+}) {
+  return (
+    <section
+      className="absolute overflow-hidden"
+      style={{
+        left: room.left,
+        top: room.top,
+        width: room.width,
+        height: room.height,
+        border: `1px solid ${room.color}`,
+        background: `${room.color}08`,
+        boxShadow: `inset 0 0 42px ${room.color}08`,
+      }}
+    >
+      <div
+        className="absolute left-3 top-3"
+        style={{
+          fontFamily: "var(--font-pixel)",
+          fontSize: 8,
+          letterSpacing: 2,
+          color: room.color,
+          textShadow: `0 0 8px ${room.color}`,
+        }}
+      >
+        {room.label}
+      </div>
+      {room.variant === "engineering" && <EngineeringPlatforms />}
+      {room.variant === "huddle" && <HuddleTable />}
+      {room.variant === "lounge" && <LoungeBench />}
+      {room.variant === "library" && <LibraryShelves />}
+    </section>
+  );
+}
+
+function EngineeringPlatforms() {
+  const platforms = [
+    { left: "9%", top: "31%" },
+    { left: "26%", top: "31%" },
+    { left: "43%", top: "31%" },
+    { left: "60%", top: "31%" },
+    { left: "9%", top: "60%" },
+    { left: "26%", top: "60%" },
+    { left: "43%", top: "60%" },
+    { left: "60%", top: "60%" },
+  ];
+  return (
+    <>
+      {platforms.map((item, index) => (
+        <div
+          key={index}
+          className="absolute h-[15%] w-[14%]"
+          style={{
+            left: item.left,
+            top: item.top,
+            border: `1px solid ${t4.agent}`,
+            background: `${t4.agent}24`,
+            boxShadow: `0 0 12px ${t4.agent}18`,
+          }}
+        />
+      ))}
+    </>
+  );
+}
+
+function HuddleTable() {
+  return (
+    <div
+      className="absolute left-[31%] top-[39%] h-[31%] w-[37%] rounded-[50%]"
+      style={{
+        border: `1px solid ${t4.mp}`,
+        background: "rgba(90,168,255,0.05)",
+        boxShadow: `0 0 16px ${t4.mp}20`,
+      }}
+    />
+  );
+}
+
+function LoungeBench() {
+  return (
+    <div
+      className="absolute left-[13%] top-[65%] h-[13%] w-[59%]"
+      style={{
+        border: `1px solid ${t4.ok}`,
+        background: `${t4.ok}18`,
+      }}
+    />
+  );
+}
+
+function LibraryShelves() {
+  return (
+    <div className="absolute left-[7%] top-[23%] grid w-[78%] gap-4">
+      {[0, 1, 2].map((item) => (
+        <div
+          key={item}
+          className="h-3"
+          style={{
+            background: "rgba(255,216,74,0.42)",
+            boxShadow: `0 0 10px ${t4.xp}12`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function QuestMarker() {
+  return (
+    <button
+      type="button"
+      className="absolute left-[61.5%] top-[13.5%] flex h-[52px] w-[52px] items-center justify-center"
+      style={{
+        border: `2px solid ${t4.xp}`,
+        background: "#fff6c7",
+        color: "#050713",
+        boxShadow: `0 0 24px ${t4.xp}`,
+        fontFamily: "var(--font-pixel)",
+        fontSize: 12,
+      }}
+      aria-label="Quest"
+    >
+      ★
+      <span
+        className="absolute left-1/2 top-[58px] -translate-x-1/2"
+        style={{
+          color: t4.xp,
+          fontFamily: "var(--font-pixel)",
+          fontSize: 8,
+          letterSpacing: 2,
+          textShadow: `0 0 8px ${t4.xp}`,
+        }}
+      >
+        QUEST
+      </span>
+    </button>
+  );
+}
+
+function StageActor({
+  actor,
+  position,
+  selected,
+  onContextMenu,
+  onSelect,
+}: {
+  actor: OfficeActor;
+  position: StageActorPosition;
+  selected: boolean;
+  onContextMenu: (payload: { actor: OfficeActor; x: number; y: number }) => void;
+  onSelect: (actor: OfficeActor) => void;
+}) {
+  const isAgent = actor.kind === "agent";
+  const accent = isAgent ? t4.agent : t4.pink;
+  const status = STATUS_META[actor.status];
+  return (
+    <button
+      type="button"
+      className="absolute z-20 -translate-x-1/2 -translate-y-1/2 cursor-pointer border-0 bg-transparent p-0"
+      style={{ left: position.left, top: position.top }}
+      onClick={() => onSelect(actor)}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onContextMenu({ actor, x: event.clientX, y: event.clientY });
+      }}
+      aria-label={`${actor.name} 채팅`}
+    >
+      <div
+        className="absolute left-1/2 top-[-34px] min-w-[112px] -translate-x-1/2 px-2 py-1"
+        style={{
+          border: `1px solid ${accent}`,
+          background: "rgba(9,11,22,0.92)",
+          boxShadow: selected ? `0 0 14px ${accent}` : `0 0 10px ${accent}30`,
+        }}
+      >
+        <div className="flex items-center justify-center gap-1.5">
+          <span
+            className="h-1.5 w-1.5 shrink-0"
+            style={{
+              background: status.dotClassName === "bg-working" ? t4.ok : accent,
+              boxShadow: `0 0 6px ${accent}`,
+            }}
+          />
+          <span
+            className="truncate"
+            style={{
+              maxWidth: 92,
+              fontFamily: "var(--font-pixel)",
+              fontSize: 7,
+              letterSpacing: 1,
+              color: t4.ink,
+            }}
+          >
+            {actor.name.toUpperCase()}
+          </span>
+        </div>
+      </div>
+      <div
+        style={{
+          padding: 4,
+          filter: selected ? `drop-shadow(0 0 14px ${accent})` : `drop-shadow(0 0 8px ${accent}80)`,
+        }}
+      >
+        <PixelAvatar kind={pickAvatarKind(actor.name, isAgent)} size={3} walking={actor.status === "working"} />
+      </div>
+    </button>
   );
 }
 
@@ -811,19 +1200,41 @@ function ActorContextMenu({
   const left = Math.min(menu.x, window.innerWidth - 190);
   const top = Math.min(menu.y, window.innerHeight - 88);
 
+  const accent = menu.actor.kind === "agent" ? t4.agent : t4.pink;
   return (
     <div
-      className="fixed z-40 w-44 rounded-lg border border-[var(--neon-border)] bg-surface p-1"
-      style={{ left, top }}
+      className="fixed z-40 w-48 p-1"
+      style={{
+        left,
+        top,
+        background: "rgba(20,28,55,0.95)",
+        border: `1px solid ${accent}`,
+        boxShadow: `0 0 14px ${accent}40, inset 0 0 12px rgba(154,122,255,0.06)`,
+      }}
       onClick={(e) => e.stopPropagation()}
     >
       <button
         type="button"
         onClick={() => onChat(menu.actor)}
-        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-caption font-semibold text-text hover:bg-primary-muted"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left"
+        style={{
+          fontFamily: "var(--font-pixel)",
+          fontSize: 8,
+          letterSpacing: 1.5,
+          color: accent,
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = `${accent}15`;
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "transparent";
+        }}
       >
-        <MessageCircle className="h-3.5 w-3.5 text-primary" />
-        {menu.actor.kind === "agent" ? "Agent 채팅" : "채팅하기"}
+        <MessageCircle className="h-3.5 w-3.5" />
+        {menu.actor.kind === "agent" ? "▶ TALK TO AGENT" : "▶ TALK"}
       </button>
     </div>
   );
@@ -862,81 +1273,247 @@ function ActorChatSidePanel({
 }) {
   if (!open || !target) return null;
   const isAgent = target?.kind === "agent";
+  const accent = isAgent ? t4.agent : t4.pink;
+  const avatarKind: PixelAvatarKind = isAgent ? "agent" : "mira";
 
   return (
     <aside
-      className="absolute bottom-20 left-3 top-3 z-30 flex w-[calc(100%-1.5rem)] flex-col overflow-hidden rounded-lg border border-[var(--neon-border)] bg-bg/96 sm:left-4 sm:top-4 sm:w-[380px]"
+      className="absolute bottom-20 left-3 top-3 z-30 flex w-[calc(100%-1.5rem)] flex-col overflow-hidden sm:left-4 sm:top-4 sm:w-[400px]"
+      style={{
+        background: "rgba(20,28,55,0.96)",
+        border: `1px solid ${accent}`,
+        boxShadow: `0 0 0 1px rgba(0,0,0,0.6), inset 0 0 24px rgba(154,122,255,0.08), 0 0 18px ${accent}40`,
+      }}
     >
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--neon-border-muted)] px-4 py-3">
-        <div className="flex min-w-0 items-center gap-2">
-          {isAgent ? <Bot className="h-5 w-5 shrink-0 text-primary" /> : <Users className="h-5 w-5 shrink-0 text-primary" />}
+      <header
+        className="flex shrink-0 items-center justify-between gap-3 px-4 py-3"
+        style={{
+          borderBottom: `1px solid ${t4.line}`,
+          background: "rgba(0,0,0,0.4)",
+        }}
+      >
+        <div className="flex min-w-0 items-center gap-3">
+          <div
+            style={{
+              padding: 4,
+              border: `1px solid ${accent}`,
+              background: "rgba(0,0,0,0.4)",
+              boxShadow: `0 0 8px ${accent}40`,
+              flexShrink: 0,
+            }}
+          >
+            <PixelAvatar kind={avatarKind} size={2} />
+          </div>
           <div className="min-w-0">
-            <p className="truncate text-body font-semibold text-text">{target.name}</p>
-            <p className="truncate text-micro text-text-dim">
+            <p
+              className="truncate"
+              style={{
+                fontFamily: "var(--font-pixel)",
+                fontSize: 9,
+                letterSpacing: 1.5,
+                color: accent,
+                textShadow: `0 0 6px ${accent}`,
+              }}
+            >
+              {isAgent ? "◇ " : "● "}
+              {target.name.toUpperCase()}
+            </p>
+            <p
+              className="truncate"
+              style={{
+                fontFamily: "var(--font-mono-arcade)",
+                fontSize: 9,
+                color: t4.dim,
+                marginTop: 3,
+                letterSpacing: 1,
+              }}
+            >
               {isAgent ? `AGENT · ${target.role}` : target.role}
             </p>
           </div>
         </div>
-        <Button type="button" variant="ghost" size="sm" onClick={onClose}>
-          닫기
-        </Button>
+        <button
+          type="button"
+          onClick={onClose}
+          style={{
+            fontFamily: "var(--font-pixel)",
+            fontSize: 8,
+            letterSpacing: 1.5,
+            padding: "5px 10px",
+            color: t4.dim,
+            background: "transparent",
+            border: `1px solid ${t4.line}`,
+            cursor: "pointer",
+          }}
+        >
+          ✕ ESC
+        </button>
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
-          {messages.map((message) => (
+        <div
+          className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4"
+          style={{ background: "rgba(0,0,0,0.25)" }}
+        >
+          {messages.length === 0 && (
             <div
-              key={message.id}
-              className={[
-                "max-w-[86%] rounded-lg border px-3 py-2 text-caption",
-                message.from === "me"
-                  ? "ml-auto border-primary-light/40 bg-primary-muted text-text"
-                  : message.from === "target"
-                    ? "border-[var(--neon-border-muted)] bg-surface text-text"
-                    : "mx-auto border-border bg-surface text-text-muted",
-              ].join(" ")}
+              style={{
+                fontFamily: "var(--font-mono-arcade)",
+                fontSize: 11,
+                color: t4.dim,
+                textAlign: "center",
+                padding: "20px 10px",
+              }}
             >
-              {message.text}
+              ◆ no chatter yet — say hi!
             </div>
-          ))}
+          )}
+          {messages.map((message) => {
+            if (message.from === "system") {
+              return (
+                <div
+                  key={message.id}
+                  style={{
+                    fontFamily: "var(--font-pixel)",
+                    fontSize: 8,
+                    letterSpacing: 2,
+                    color: t4.xp,
+                    textAlign: "center",
+                    padding: "6px 10px",
+                    border: `1px solid ${t4.xp}`,
+                    background: "rgba(255,216,74,0.06)",
+                    boxShadow: `0 0 10px ${t4.xp}30`,
+                    textShadow: `0 0 6px ${t4.xp}`,
+                  }}
+                >
+                  ★ {message.text}
+                </div>
+              );
+            }
+            const fromMe = message.from === "me";
+            return (
+              <div
+                key={message.id}
+                style={{
+                  maxWidth: "86%",
+                  marginLeft: fromMe ? "auto" : 0,
+                  padding: "8px 11px",
+                  fontFamily: "var(--font-mono-arcade)",
+                  fontSize: 11,
+                  color: t4.ink,
+                  border: `1px solid ${fromMe ? t4.pink : accent}40`,
+                  background: fromMe
+                    ? "rgba(255,122,220,0.08)"
+                    : "rgba(20,28,55,0.6)",
+                  lineHeight: 1.5,
+                }}
+              >
+                {message.text}
+              </div>
+            );
+          })}
         </div>
 
         {isAgent ? (
-          <form onSubmit={onSubmitTask} className="grid gap-2 border-t border-border bg-surface/70 p-3">
-            <p className="text-caption font-semibold text-text">태스크 등록</p>
+          <form
+            onSubmit={onSubmitTask}
+            className="grid gap-2 p-3"
+            style={{
+              borderTop: `1px solid ${t4.line}`,
+              background: "rgba(0,0,0,0.5)",
+            }}
+          >
+            <p
+              style={{
+                fontFamily: "var(--font-pixel)",
+                fontSize: 8,
+                color: t4.xp,
+                letterSpacing: 2,
+                textShadow: `0 0 4px ${t4.xp}`,
+              }}
+            >
+              ◆ ASSIGN QUEST
+            </p>
             <Input
               value={taskTitle}
               onChange={(e) => onTaskTitleChange(e.target.value)}
-              placeholder="태스크 제목"
+              placeholder="quest title"
               disabled={taskSubmitting}
             />
             <textarea
               value={taskDescription}
               onChange={(e) => onTaskDescriptionChange(e.target.value)}
-              placeholder="설명"
+              placeholder="description"
               disabled={taskSubmitting}
-              className="min-h-20 rounded-md border border-border bg-surface px-3 py-2 text-body text-text focus:border-primary-light focus:outline-none focus:ring-2 focus:ring-primary-light/40 disabled:opacity-50"
+              className="min-h-20 px-3 py-2"
+              style={{
+                background: "rgba(10,13,26,0.8)",
+                border: `1px solid ${t4.line}`,
+                color: t4.ink,
+                fontFamily: "var(--font-mono-arcade)",
+                fontSize: 11,
+                outline: "none",
+              }}
             />
-            {taskError && <p className="text-caption text-danger">{taskError}</p>}
+            {taskError && (
+              <p
+                style={{
+                  fontFamily: "var(--font-mono-arcade)",
+                  fontSize: 10,
+                  color: t4.hp,
+                }}
+              >
+                ⚠ {taskError}
+              </p>
+            )}
             <Button type="submit" size="sm" icon={<Plus />} loading={taskSubmitting}>
-              태스크 등록
+              QUEST 등록
             </Button>
           </form>
         ) : (
-          <p className="border-t border-border bg-surface/70 p-3 text-caption text-text-muted">
-            실시간 메시지 API가 붙으면 이 사이드 창에서 그대로 연결하면 됩니다.
+          <p
+            className="p-3"
+            style={{
+              fontFamily: "var(--font-mono-arcade)",
+              fontSize: 10,
+              color: t4.dim,
+              borderTop: `1px solid ${t4.line}`,
+              background: "rgba(0,0,0,0.4)",
+            }}
+          >
+            ◇ Real-time API not wired yet — messages stay local for now.
           </p>
         )}
 
-        <form onSubmit={onSubmitMessage} className="flex shrink-0 gap-2 border-t border-border p-3">
+        <form
+          onSubmit={onSubmitMessage}
+          className="flex shrink-0 gap-2 p-3"
+          style={{
+            borderTop: `1px solid ${t4.line}`,
+            background: "rgba(0,0,0,0.5)",
+          }}
+        >
+          <span
+            style={{
+              fontFamily: "var(--font-pixel)",
+              fontSize: 11,
+              color: t4.pink,
+              letterSpacing: 1,
+              padding: "8px 4px",
+            }}
+          >
+            ▶
+          </span>
           <Input
             value={input}
             onChange={(e) => onInputChange(e.target.value)}
-            placeholder={isAgent ? "예) 로그인 버그 태스크 등록해줘" : "메시지를 입력하세요"}
+            placeholder={
+              isAgent ? "/quest 로그인 버그 등록해줘" : "type a message…"
+            }
             autoFocus
           />
           <Button type="submit" icon={<Send />}>
-            전송
+            ↵
           </Button>
         </form>
       </div>
@@ -944,52 +1521,496 @@ function ActorChatSidePanel({
   );
 }
 
-function HudMetric({
-  label,
-  value,
-  detail,
+function HeroHud({
+  name,
+  memberCount,
+  workingCount,
 }: {
-  label: string;
-  value: number;
-  detail: string;
+  name: string;
+  memberCount: number;
+  workingCount: number;
 }) {
+  const kind = pickAvatarKind(name);
+  const display = name.toUpperCase().slice(0, 10);
+  const lv = Math.max(1, Math.min(99, memberCount * 7 + workingCount * 3));
+  const hpPct = workingCount === 0 ? 100 : Math.max(20, 100 - workingCount * 12);
+  const mpPct = Math.min(95, 25 + workingCount * 15);
+  const xpPct = Math.min(100, 12 + memberCount * 9);
   return (
-    <div className="rounded-lg border border-[var(--neon-border-muted)] bg-surface/92 px-3 py-2">
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-micro font-bold uppercase text-text-muted">{label}</span>
-        <Users className="h-3.5 w-3.5 text-primary" />
+    <T4Panel
+      label="HERO"
+      accent={t4.pink}
+      style={{ position: "absolute", top: 14, left: 14, padding: 10, width: 220, zIndex: 30 }}
+    >
+      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        <div style={{ background: "rgba(0,0,0,0.4)", padding: 4, border: `1px solid ${t4.pink}` }}>
+          <PixelAvatar kind={kind} size={2} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span style={{ fontFamily: "var(--font-pixel)", fontSize: 8, letterSpacing: 1, color: t4.ink }}>
+              {display}
+            </span>
+            <span style={{ fontFamily: "var(--font-pixel)", fontSize: 8, color: t4.xp, letterSpacing: 1 }}>
+              LV.{String(lv).padStart(2, "0")}
+            </span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 6 }}>
+            <MiniBar pct={hpPct} color={t4.hp} />
+            <MiniBar pct={mpPct} color={t4.mp} />
+            <MiniBar pct={xpPct} color={t4.xp} thin />
+          </div>
+        </div>
       </div>
-      <p className="mt-1 text-xl font-bold leading-none text-text">{value}</p>
-      <p className="mt-1 text-micro text-text-dim">{detail}</p>
+    </T4Panel>
+  );
+}
+
+function MiniBar({ pct, color, thin }: { pct: number; color: string; thin?: boolean }) {
+  return (
+    <div style={{ height: thin ? 3 : 4, background: "#0a0d1a" }}>
+      <div style={{ width: `${pct}%`, height: "100%", background: color }} />
     </div>
   );
+}
+
+function MapHud({
+  rooms,
+  totalActors,
+  zoom,
+  pan,
+  stageSize,
+}: {
+  rooms: MiniMapRoom[];
+  totalActors: number;
+  zoom: number;
+  pan: StagePan;
+  stageSize: StageSize;
+}) {
+  const stageWidth = Math.max(1, stageSize.width);
+  const stageHeight = Math.max(1, stageSize.height);
+  const viewportW = clampMiniMapValue(100 / zoom, 24, 100);
+  const viewportH = clampMiniMapValue(100 / zoom, 24, 100);
+  const viewportLeft = clampMiniMapValue(
+    50 - viewportW / 2 - (pan.x / (stageWidth * zoom)) * 100,
+    0,
+    100 - viewportW,
+  );
+  const viewportTop = clampMiniMapValue(
+    50 - viewportH / 2 - (pan.y / (stageHeight * zoom)) * 100,
+    0,
+    100 - viewportH,
+  );
+
+  return (
+    <T4Panel
+      label="MAP · FLOOR 01"
+      accent={t4.mp}
+      style={{ position: "absolute", top: 14, right: 14, padding: 8, width: 200, zIndex: 30 }}
+    >
+      <div
+        style={{
+          position: "relative",
+          height: 110,
+          border: `1px solid ${t4.line}`,
+          background: "#0a0d1a",
+        }}
+      >
+        {rooms.map((r) => (
+          <div
+            key={r.label}
+            style={{
+              position: "absolute",
+              left: r.x,
+              top: r.y,
+              width: r.w,
+              height: r.h,
+              border: `1px solid ${r.color}`,
+              background: `${r.color}1A`,
+            }}
+          >
+            {r.count > 0 && (
+              <div
+                style={{
+                  position: "absolute",
+                  left: 4,
+                  top: 4,
+                  width: 4,
+                  height: 4,
+                  background: r.color,
+                  boxShadow: `0 0 6px ${r.color}`,
+                }}
+              />
+            )}
+          </div>
+        ))}
+        <div
+          style={{
+            position: "absolute",
+            left: `${viewportLeft}%`,
+            top: `${viewportTop}%`,
+            width: `${viewportW}%`,
+            height: `${viewportH}%`,
+            border: `1px solid ${t4.ink}`,
+            boxShadow: `0 0 8px ${t4.ink}80, inset 0 0 10px rgba(245,247,255,0.08)`,
+            background: "rgba(245,247,255,0.04)",
+            pointerEvents: "none",
+          }}
+        />
+      </div>
+      <div
+        style={{
+          marginTop: 6,
+          display: "flex",
+          justifyContent: "space-between",
+          fontFamily: "var(--font-pixel)",
+          fontSize: 7,
+          letterSpacing: 2,
+          color: t4.dim,
+        }}
+      >
+        <span>◆ {String(totalActors).padStart(2, "0")} ALLIES</span>
+        <span style={{ color: t4.mp }}>● YOU</span>
+      </div>
+    </T4Panel>
+  );
+}
+
+function MapZoomControls({
+  zoom,
+  onZoomOut,
+  onReset,
+  onZoomIn,
+}: {
+  zoom: number;
+  onZoomOut: () => void;
+  onReset: () => void;
+  onZoomIn: () => void;
+}) {
+  return (
+    <div
+      className="absolute right-3 top-[154px] z-30 flex items-center gap-1 sm:right-4"
+      style={{
+        border: `1px solid ${t4.line}`,
+        background: "rgba(10,13,26,0.88)",
+        boxShadow: `0 0 10px ${t4.mp}22`,
+        padding: 4,
+      }}
+    >
+      <ZoomButton onClick={onZoomOut} disabled={zoom <= STAGE_ZOOM_MIN}>
+        -
+      </ZoomButton>
+      <button
+        type="button"
+        onClick={onReset}
+        style={{
+          minWidth: 54,
+          height: 25,
+          border: `1px solid ${t4.line}`,
+          background: "transparent",
+          color: t4.dim,
+          cursor: "pointer",
+          fontFamily: "var(--font-pixel)",
+          fontSize: 7,
+          letterSpacing: 1,
+        }}
+      >
+        {Math.round(zoom * 100)}%
+      </button>
+      <ZoomButton onClick={onZoomIn} disabled={zoom >= STAGE_ZOOM_MAX}>
+        +
+      </ZoomButton>
+    </div>
+  );
+}
+
+function ZoomButton({
+  children,
+  disabled,
+  onClick,
+}: {
+  children: ReactNode;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        width: 25,
+        height: 25,
+        border: `1px solid ${disabled ? t4.line : t4.mp}`,
+        background: disabled ? "rgba(255,255,255,0.03)" : "rgba(90,168,255,0.08)",
+        color: disabled ? t4.dim : t4.mp,
+        cursor: disabled ? "not-allowed" : "pointer",
+        fontFamily: "var(--font-pixel)",
+        fontSize: 10,
+        lineHeight: 1,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function DialogueBox({
+  actors,
+  selectedActor,
+  adminCount,
+  onTalk,
+  onTasks,
+  onHire,
+}: {
+  actors: OfficeActor[];
+  selectedActor: OfficeActor | null;
+  adminCount: number;
+  onTalk: (actor: OfficeActor) => void;
+  onTasks: () => void;
+  onHire: () => void;
+}) {
+  const featured =
+    selectedActor ??
+    actors.find((a) => a.kind === "agent" && a.status === "working") ??
+    actors.find((a) => a.kind === "agent") ??
+    actors[0] ??
+    null;
+  const isAgent = featured?.kind === "agent";
+  const speaker = featured?.name ?? "GUIDE";
+  const accent = featured ? (isAgent ? t4.agent : t4.pink) : t4.dim;
+  const avatarKind: PixelAvatarKind = featured ? pickAvatarKind(featured.name, isAgent) : "agent";
+  const line = featured
+    ? isAgent
+      ? `"I cloned the latest branch — ${actors.length} workspace members on deck, ${adminCount} admin online. Want me to triage the next quest?"`
+      : `"${speaker} is ${STATUS_META[featured.status].label}. Wave hi or hand off a quest."`
+    : `"No allies on the floor yet. Hire an agent or invite teammates from WORKSPACE."`;
+
+  return (
+    <div
+      className="absolute inset-x-3 bottom-3 z-20 sm:inset-x-6 sm:bottom-4"
+      style={{ pointerEvents: "none" }}
+    >
+      <T4Panel
+        accent={accent}
+        style={{
+          position: "relative",
+          padding: "14px 18px 14px 14px",
+          display: "flex",
+          gap: 14,
+          alignItems: "flex-start",
+          pointerEvents: "auto",
+        }}
+      >
+        <div
+          style={{
+            flexShrink: 0,
+            padding: 8,
+            border: `1px solid ${accent}`,
+            background: "rgba(0,0,0,0.4)",
+            boxShadow: `0 0 10px ${accent}50`,
+          }}
+        >
+          <PixelAvatar kind={avatarKind} size={3} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontFamily: "var(--font-pixel)",
+              fontSize: 9,
+              color: accent,
+              letterSpacing: 2,
+              marginBottom: 6,
+              textShadow: `0 0 8px ${accent}`,
+            }}
+          >
+            {isAgent ? "◇ " : featured ? "● " : "★ "}
+            {speaker.toUpperCase()}
+          </div>
+          <div
+            style={{
+              fontFamily: "var(--font-mono-arcade)",
+              fontSize: 12,
+              color: t4.ink,
+              lineHeight: 1.55,
+            }}
+          >
+            {line}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {featured ? (
+              <DialogueChoice primary onClick={() => onTalk(featured)}>
+                ▶ TALK
+              </DialogueChoice>
+            ) : null}
+            <DialogueChoice onClick={onTasks}>QUESTS</DialogueChoice>
+            <DialogueChoice onClick={onHire}>HIRE</DialogueChoice>
+          </div>
+        </div>
+        <div
+          style={{
+            position: "absolute",
+            right: 14,
+            bottom: 8,
+            fontFamily: "var(--font-pixel)",
+            fontSize: 7,
+            color: t4.dim,
+            letterSpacing: 2,
+          }}
+        >
+          ▼ NEXT
+        </div>
+      </T4Panel>
+    </div>
+  );
+}
+
+function DialogueChoice({
+  children,
+  primary,
+  onClick,
+}: {
+  children: React.ReactNode;
+  primary?: boolean;
+  onClick?: () => void;
+}) {
+  const color = primary ? t4.pink : t4.dim;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        fontFamily: "var(--font-pixel)",
+        fontSize: 9,
+        letterSpacing: 1,
+        padding: "8px 12px",
+        border: `1px solid ${primary ? t4.pink : t4.line}`,
+        color,
+        background: primary ? "rgba(255,122,220,0.08)" : "transparent",
+        boxShadow: primary ? `0 0 10px ${t4.pink}40` : "none",
+        cursor: "pointer",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function pickAvatarKind(name: string, agent = false): PixelAvatarKind {
+  if (agent) return "agent";
+  const kinds: PixelAvatarKind[] = ["mira", "alex", "kenji", "yuna", "diego", "iris"];
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return kinds[h % kinds.length];
 }
 
 function Skyline() {
   return (
-    <div className="absolute inset-x-0 top-0 h-36 bg-gradient-to-b from-[#bfe7ff] to-transparent">
-      <div className="absolute left-[8%] top-6 h-16 w-24 rounded-md border border-white/80 bg-white/55" />
-      <div className="absolute left-[28%] top-9 h-12 w-20 rounded-md border border-white/80 bg-white/45" />
-      <div className="absolute right-[24%] top-5 h-14 w-24 rounded-md border border-white/80 bg-white/50" />
-      <div className="absolute right-[8%] top-8 h-12 w-20 rounded-md border border-white/80 bg-white/45" />
-    </div>
+    <div
+      className="absolute inset-0"
+      style={{
+        backgroundImage:
+          "linear-gradient(rgba(154,122,255,0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(154,122,255,0.07) 1px, transparent 1px), radial-gradient(circle at 18% 14%, rgba(255,122,220,0.12), transparent 28%), radial-gradient(circle at 86% 18%, rgba(90,168,255,0.12), transparent 28%)",
+        backgroundSize: "24px 24px, 24px 24px, 100% 100%, 100% 100%",
+        pointerEvents: "none",
+      }}
+    />
   );
 }
 
-const OFFICE_DESK_CAPACITY = 6;
-
-async function copyInviteUrl(
-  inviteUrl: string,
-  kind: "email" | "link",
-  setCopiedInviteKind: (value: "email" | "link" | null) => void,
-) {
-  try {
-    await window.navigator.clipboard?.writeText(inviteUrl);
-    setCopiedInviteKind(kind);
-  } catch {
-    setCopiedInviteKind(null);
-  }
+const OFFICE_DESK_CAPACITY = 9;
+const STAGE_ZOOM_MIN = 0.75;
+const STAGE_ZOOM_MAX = 1.5;
+const STAGE_ZOOM_STEP = 0.125;
+function clampStageZoom(value: number) {
+  return Math.min(STAGE_ZOOM_MAX, Math.max(STAGE_ZOOM_MIN, Number(value.toFixed(3))));
 }
+
+function clampMiniMapValue(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function pct(value: number) {
+  return `${Number(value.toFixed(2))}%`;
+}
+
+function getStageRooms(actorCount: number): StageRoomSpec[] {
+  const growth = Math.max(0, actorCount - 5);
+  const largeGrowth = Math.max(0, actorCount - 8);
+  const engineeringWidth = Math.min(42, 30.5 + growth * 1.8);
+  const engineeringHeight = Math.min(43, 37 + growth * 0.7);
+  const huddleWidth = Math.min(27, 21.6 + largeGrowth * 1.2);
+  const huddleLeft = Math.min(94 - huddleWidth, 5.5 + engineeringWidth + 2.2);
+  const libraryWidth = Math.min(40, 32.8 + largeGrowth * 1.1);
+  const loungeWidth = Math.min(24, 19.3 + largeGrowth * 0.8);
+
+  return [
+    {
+      label: "♦ ENGINEERING",
+      left: pct(5.5),
+      top: pct(8.5),
+      width: pct(engineeringWidth),
+      height: pct(engineeringHeight),
+      color: t4.pink,
+      variant: "engineering",
+    },
+    {
+      label: "♦ HUDDLE",
+      left: pct(huddleLeft),
+      top: pct(8.5),
+      width: pct(huddleWidth),
+      height: pct(Math.min(29, 24.5 + largeGrowth * 0.8)),
+      color: t4.mp,
+      variant: "huddle",
+    },
+    {
+      label: "♦ LOUNGE",
+      left: pct(5.5),
+      top: pct(Math.min(52, 48 + growth * 0.35)),
+      width: pct(loungeWidth),
+      height: pct(Math.min(25, 21.5 + largeGrowth * 0.6)),
+      color: t4.ok,
+      variant: "lounge",
+    },
+    {
+      label: "♦ LIBRARY · QUIET ZONE",
+      left: pct(Math.min(30, 27 + growth * 0.35)),
+      top: pct(Math.min(40, 36.5 + growth * 0.4)),
+      width: pct(libraryWidth),
+      height: pct(Math.min(38, 33.6 + largeGrowth * 0.8)),
+      color: t4.xp,
+      variant: "library",
+    },
+  ];
+}
+
+function getStageMiniMapRooms(rooms: StageRoomSpec[], agentCount: number): MiniMapRoom[] {
+  return rooms.map((room) => ({
+    color: room.color,
+    label: room.label,
+    x: room.left,
+    y: room.top,
+    w: room.width,
+    h: room.height,
+    count: room.variant === "engineering" ? agentCount : 0,
+  }));
+}
+
+const STAGE_ACTOR_POSITIONS: StageActorPosition[] = [
+  { left: "10.5%", top: "21%" },
+  { left: "15.8%", top: "21%" },
+  { left: "21.1%", top: "21%" },
+  { left: "26.4%", top: "21%" },
+  { left: "10.5%", top: "33.5%" },
+  { left: "15.8%", top: "33.5%" },
+  { left: "21.1%", top: "33.5%" },
+  { left: "26.4%", top: "33.5%" },
+  { left: "49.2%", top: "27%" },
+  { left: "55.6%", top: "33%" },
+  { left: "12.3%", top: "62.5%" },
+  { left: "33.4%", top: "66.5%" },
+  { left: "51.8%", top: "66.5%" },
+];
 
 function SettingsSelectModal({
   open,
@@ -998,7 +2019,6 @@ function SettingsSelectModal({
   onDiscord,
   onGithub,
   onOpenClaw,
-  onChannelSettings,
 }: {
   open: boolean;
   onClose: () => void;
@@ -1006,41 +2026,37 @@ function SettingsSelectModal({
   onDiscord: () => void;
   onGithub: () => void;
   onOpenClaw: () => void;
-  onChannelSettings: () => void;
 }) {
   return (
-    <Modal open={open} onClose={onClose} title="채널 설정" size="md">
+    <Modal open={open} onClose={onClose} title="LINK 연결" size="md">
       <Modal.Body className="grid gap-3 sm:grid-cols-2">
         <SettingChoice
           icon={<Bell />}
           title="Slack"
           description="업무 결과와 알림을 Slack 채널로 보냅니다."
+          accent={t4.pink}
           onClick={onSlack}
         />
         <SettingChoice
           icon={<MessageCircle />}
           title="Discord"
           description="Discord 채널 연동을 준비합니다."
+          accent={t4.mp}
           onClick={onDiscord}
         />
         <SettingChoice
           icon={<GitBranch />}
           title="GitHub"
           description="Repository 작업을 위한 credential을 관리합니다."
+          accent={t4.ok}
           onClick={onGithub}
         />
         <SettingChoice
           icon={<Bot />}
           title="AI / OpenClaw"
           description="OpenClaw Gateway와 Agent 실행 환경을 연결합니다."
+          accent={t4.agent}
           onClick={onOpenClaw}
-        />
-        <SettingChoice
-          icon={<Settings />}
-          title="채널 설정"
-          description="워크스페이스 정보, 멤버, 초대 링크를 관리합니다."
-          onClick={onChannelSettings}
-          className="sm:col-span-2"
         />
       </Modal.Body>
       <Modal.Footer>
@@ -1054,12 +2070,14 @@ function SettingChoice({
   icon,
   title,
   description,
+  accent,
   onClick,
   className = "",
 }: {
   icon: ReactNode;
   title: string;
   description: string;
+  accent: string;
   onClick: () => void;
   className?: string;
 }) {
@@ -1067,14 +2085,56 @@ function SettingChoice({
     <button
       type="button"
       onClick={onClick}
-      className={`flex items-start gap-3 rounded-lg border border-border bg-surface p-4 text-left transition-colors hover:border-primary-light hover:bg-primary-muted ${className}`}
+      className={`flex items-start gap-3 p-4 text-left transition-colors ${className}`}
+      style={{
+        border: `1px solid ${accent}`,
+        background: "rgba(10,13,26,0.74)",
+        boxShadow: `0 0 0 1px rgba(0,0,0,0.55), inset 0 0 18px ${accent}10, 0 0 10px ${accent}22`,
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = `${accent}12`;
+        e.currentTarget.style.boxShadow = `0 0 0 1px rgba(0,0,0,0.55), inset 0 0 24px ${accent}18, 0 0 15px ${accent}38`;
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "rgba(10,13,26,0.74)";
+        e.currentTarget.style.boxShadow = `0 0 0 1px rgba(0,0,0,0.55), inset 0 0 18px ${accent}10, 0 0 10px ${accent}22`;
+      }}
     >
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-surface-raised text-primary">
+      <span
+        className="flex h-10 w-10 shrink-0 items-center justify-center"
+        style={{
+          border: `1px solid ${accent}`,
+          color: accent,
+          background: "rgba(0,0,0,0.35)",
+          boxShadow: `0 0 8px ${accent}35`,
+        }}
+      >
         {icon}
       </span>
       <span className="min-w-0">
-        <span className="block text-body font-semibold text-text">{title}</span>
-        <span className="mt-1 block text-caption text-text-muted">{description}</span>
+        <span
+          className="block"
+          style={{
+            fontFamily: "var(--font-pixel)",
+            fontSize: 9,
+            letterSpacing: 1.5,
+            color: accent,
+            textShadow: `0 0 6px ${accent}70`,
+          }}
+        >
+          {title.toUpperCase()}
+        </span>
+        <span
+          className="mt-2 block"
+          style={{
+            fontFamily: "var(--font-mono-arcade)",
+            fontSize: 11,
+            lineHeight: 1.5,
+            color: t4.dim,
+          }}
+        >
+          {description}
+        </span>
       </span>
     </button>
   );
@@ -1098,7 +2158,7 @@ function TaskDashboardModal({
   onRefresh: () => void;
 }) {
   return (
-    <Modal open={open} onClose={onClose} title="태스크 진행 상황" size="full">
+    <Modal open={open} onClose={onClose} title="QUESTS 태스크 진행 상황" size="full">
       <Modal.Body className="flex min-h-[62vh] flex-col gap-5">
         {error && (
           <p className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-caption text-danger">
@@ -1136,40 +2196,132 @@ function TaskColumn({
   tasks: WorkspaceTask[];
   actors: OfficeActor[];
 }) {
+  const accent = taskGroupAccent(group.key);
   return (
-    <div className="min-h-[420px] rounded-lg border border-border bg-surface-raised/70 p-4">
+    <div
+      className="min-h-[420px] p-4"
+      style={{
+        border: `1px solid ${accent}`,
+        background: "rgba(10,13,26,0.72)",
+        boxShadow: `inset 0 0 22px ${accent}10, 0 0 12px ${accent}18`,
+      }}
+    >
       <div className="flex items-center justify-between gap-3">
-        <h3 className="text-title text-text">{group.label}</h3>
-        <span className={`rounded-full px-2 py-0.5 text-micro font-semibold ${group.className}`}>
+        <h3
+          style={{
+            fontFamily: "var(--font-pixel)",
+            fontSize: 10,
+            letterSpacing: 2,
+            color: accent,
+            textShadow: `0 0 7px ${accent}70`,
+            margin: 0,
+          }}
+        >
+          {group.label}
+        </h3>
+        <span
+          className="px-2 py-0.5"
+          style={{
+            border: `1px solid ${accent}`,
+            color: accent,
+            background: `${accent}12`,
+            fontFamily: "var(--font-pixel)",
+            fontSize: 8,
+            letterSpacing: 1,
+          }}
+        >
           {tasks.length}
         </span>
       </div>
       <div className="mt-3 grid gap-2">
         {tasks.length > 0 ? (
           tasks.map((task) => (
-            <div key={task.taskId} className="rounded-md border border-border bg-surface px-3 py-2">
+            <div
+              key={task.taskId}
+              className="px-3 py-2"
+              style={{
+                border: `1px solid ${t4.line}`,
+                background: "rgba(20,28,55,0.7)",
+                boxShadow: "inset 0 0 12px rgba(154,122,255,0.05)",
+              }}
+            >
               <div className="flex items-start justify-between gap-2">
-                <p className="min-w-0 text-caption font-semibold text-text">{task.title}</p>
-                <span className={`shrink-0 rounded-full px-2 py-0.5 text-micro font-semibold ${TASK_STATUS_META[task.status].className}`}>
+                <p
+                  className="min-w-0"
+                  style={{
+                    fontFamily: "var(--font-mono-arcade)",
+                    fontSize: 11,
+                    color: t4.ink,
+                    lineHeight: 1.45,
+                    margin: 0,
+                  }}
+                >
+                  {task.title}
+                </p>
+                <span
+                  className="shrink-0 px-2 py-0.5"
+                  style={{
+                    border: `1px solid ${accent}`,
+                    color: accent,
+                    background: `${accent}12`,
+                    fontFamily: "var(--font-pixel)",
+                    fontSize: 7,
+                    letterSpacing: 1,
+                  }}
+                >
                   {TASK_STATUS_META[task.status].label}
                 </span>
               </div>
               {task.description && (
-                <p className="mt-1 line-clamp-2 text-micro text-text-muted">{task.description}</p>
+                <p
+                  className="mt-2 line-clamp-2"
+                  style={{
+                    fontFamily: "var(--font-mono-arcade)",
+                    fontSize: 10,
+                    color: t4.dim,
+                    lineHeight: 1.45,
+                  }}
+                >
+                  {task.description}
+                </p>
               )}
-              <p className="mt-2 text-micro text-text-dim">
+              <p
+                className="mt-2"
+                style={{
+                  fontFamily: "var(--font-pixel)",
+                  fontSize: 7,
+                  letterSpacing: 1,
+                  color: t4.dim,
+                }}
+              >
                 {taskAssigneeName(task, actors)}
               </p>
             </div>
           ))
         ) : (
-          <p className="rounded-md border border-border bg-surface px-3 py-2 text-caption text-text-muted">
+          <p
+            className="px-3 py-2"
+            style={{
+              border: `1px solid ${t4.line}`,
+              background: "rgba(20,28,55,0.48)",
+              color: t4.dim,
+              fontFamily: "var(--font-mono-arcade)",
+              fontSize: 11,
+            }}
+          >
             태스크가 없습니다.
           </p>
         )}
       </div>
     </div>
   );
+}
+
+function taskGroupAccent(key: string) {
+  if (key === "requested") return t4.dim;
+  if (key === "assigned") return t4.mp;
+  if (key === "progress") return t4.pink;
+  return t4.ok;
 }
 
 function AgentHireModal({
@@ -1286,351 +2438,6 @@ function AgentHireModal({
           <Button type="submit" icon={<UserPlus />}>
             고용
           </Button>
-        </Modal.Footer>
-      </form>
-    </Modal>
-  );
-}
-
-function WorkspaceInfoModal({
-  open,
-  onClose,
-  workspace,
-  members,
-  actors,
-  adminCount,
-  workingCount,
-  isAdmin,
-  deleteBusy,
-  onDelete,
-  onInvite,
-}: {
-  open: boolean;
-  onClose: () => void;
-  workspace: WorkspaceDetail;
-  members: WorkspaceMember[];
-  actors: OfficeActor[];
-  adminCount: number;
-  workingCount: number;
-  isAdmin: boolean;
-  deleteBusy: boolean;
-  onDelete: () => void;
-  onInvite: () => void;
-}) {
-  return (
-    <Modal open={open} onClose={onClose} title="채널 설정" size="md">
-      <Modal.Body className="flex flex-col gap-5">
-        <section className="rounded-lg border border-border bg-surface-raised/70 p-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-title text-text">{workspace.name}</h2>
-            <Badge variant={workspace.myRole === "ADMIN" ? "info" : "default"}>
-              {workspace.myRole}
-            </Badge>
-          </div>
-          {workspace.description && (
-            <p className="mt-2 text-body text-text-muted">{workspace.description}</p>
-          )}
-          <p className="mt-3 text-caption text-text-muted">
-            생성일 {formatDateTime(workspace.createdAt)}
-          </p>
-        </section>
-
-        <section className="grid gap-3 sm:grid-cols-3">
-          <ModalMetric label="Members" value={members.length} detail={`ADMIN ${adminCount}`} />
-          <ModalMetric label="Seats" value={actors.length} detail={`${workingCount} working`} />
-          <ModalMetric label="Tasks" value="0" detail="MVP 연결 전" />
-        </section>
-
-        <section className="grid gap-3">
-          <h3 className="text-title text-text">Members</h3>
-          <div className="grid gap-2">
-            {members.map((member) => (
-              <div
-                key={member.memberId}
-                className="flex items-center justify-between gap-3 rounded-md border border-border bg-surface px-3 py-2"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-caption font-semibold text-text">{member.name}</p>
-                  <p className="truncate text-micro text-text-dim">{member.email}</p>
-                </div>
-                <Badge variant={member.role === "ADMIN" ? "info" : "default"}>
-                  {member.role}
-                </Badge>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="rounded-lg border border-danger/30 bg-danger/10 p-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h3 className="text-title text-danger">워크스페이스 삭제</h3>
-              <p className="mt-1 text-caption text-text-muted">
-                삭제는 ADMIN만 가능하며, 워크스페이스 데이터가 제거됩니다.
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="danger"
-              loading={deleteBusy}
-              disabled={!isAdmin}
-              onClick={onDelete}
-            >
-              삭제
-            </Button>
-          </div>
-          {!isAdmin && (
-            <p className="mt-3 text-caption text-danger">
-              워크스페이스 삭제는 ADMIN만 실행할 수 있습니다.
-            </p>
-          )}
-        </section>
-      </Modal.Body>
-      <Modal.Footer>
-        <Button type="button" variant="ghost" onClick={onClose}>닫기</Button>
-        <Button type="button" icon={<UserPlus />} onClick={onInvite}>
-          회원 초대
-        </Button>
-      </Modal.Footer>
-    </Modal>
-  );
-}
-
-function ModalMetric({
-  label,
-  value,
-  detail,
-}: {
-  label: string;
-  value: number | string;
-  detail: string;
-}) {
-  return (
-    <div className="rounded-lg border border-border bg-surface px-3 py-3">
-      <p className="text-micro font-bold uppercase text-text-muted">{label}</p>
-      <p className="mt-1 text-xl font-bold text-text">{value}</p>
-      <p className="text-micro text-text-dim">{detail}</p>
-    </div>
-  );
-}
-
-function DeleteWorkspaceConfirmModal({
-  open,
-  workspaceName,
-  error,
-  deleting,
-  onClose,
-  onConfirm,
-}: {
-  open: boolean;
-  workspaceName: string;
-  error: string;
-  deleting: boolean;
-  onClose: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <Modal open={open} onClose={onClose} title="워크스페이스 삭제" size="sm" disableEscapeClose={deleting}>
-      <Modal.Body className="flex flex-col gap-4">
-        <div className="rounded-lg border border-danger/30 bg-danger/10 p-4">
-          <p className="text-body font-semibold text-danger">{workspaceName}</p>
-          <p className="mt-2 text-caption text-text-muted">
-            이 워크스페이스를 삭제합니다. 삭제 후에는 워크스페이스 목록으로 이동합니다.
-          </p>
-        </div>
-        {error && <p className="text-caption text-danger">{error}</p>}
-      </Modal.Body>
-      <Modal.Footer>
-        <Button type="button" variant="ghost" onClick={onClose} disabled={deleting}>
-          취소
-        </Button>
-        <Button type="button" variant="danger" loading={deleting} onClick={onConfirm}>
-          삭제
-        </Button>
-      </Modal.Footer>
-    </Modal>
-  );
-}
-
-function InviteMemberModal({
-  open,
-  onClose,
-  email,
-  onEmailChange,
-  role,
-  onRoleChange,
-  expiresInDays,
-  onExpiresInDaysChange,
-  emailInviteUrl,
-  linkInviteUrl,
-  error,
-  copiedInviteKind,
-  submitting,
-  isAdmin,
-  onSubmit,
-  onCreateLinkOnly,
-  onCopy,
-}: {
-  open: boolean;
-  onClose: () => void;
-  email: string;
-  onEmailChange: (value: string) => void;
-  role: WorkspaceRole;
-  onRoleChange: (value: WorkspaceRole) => void;
-  expiresInDays: number;
-  onExpiresInDaysChange: (value: number) => void;
-  emailInviteUrl: string;
-  linkInviteUrl: string;
-  error: string;
-  copiedInviteKind: "email" | "link" | null;
-  submitting: boolean;
-  isAdmin: boolean;
-  onSubmit: (e: FormEvent) => void;
-  onCreateLinkOnly: () => void;
-  onCopy: (inviteUrl: string, kind: "email" | "link") => void;
-}) {
-  const [mode, setMode] = useState<"email" | "link">("email");
-  const visibleInviteUrl = mode === "email" ? emailInviteUrl : linkInviteUrl;
-  const copied = copiedInviteKind === mode;
-
-  return (
-    <Modal open={open} onClose={onClose} title="회원 초대" size="sm">
-      <form onSubmit={onSubmit}>
-        <Modal.Body className="flex flex-col gap-5">
-          <div className="rounded-lg border border-border bg-surface-raised/70 p-4">
-            <p className="text-body font-semibold text-text">
-              {mode === "email" ? "이메일 초대" : "초대 링크 만들기"}
-            </p>
-            <p className="mt-1 text-caption text-text-muted">
-              {mode === "email"
-                ? "이메일 대상자를 지정해서 워크스페이스 초대 링크를 생성합니다."
-                : "이메일 없이 공유용 초대 링크만 생성하고 복사합니다."}
-            </p>
-          </div>
-
-          <div className="grid grid-cols-2 rounded-lg border border-border bg-surface p-1">
-            <button
-              type="button"
-              onClick={() => setMode("email")}
-              className={[
-                "rounded-md px-3 py-2 text-caption font-semibold transition-colors",
-                mode === "email"
-                  ? "bg-primary-muted text-primary"
-                  : "text-text-muted hover:bg-surface-raised hover:text-text",
-              ].join(" ")}
-            >
-              이메일 초대
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode("link")}
-              className={[
-                "rounded-md px-3 py-2 text-caption font-semibold transition-colors",
-                mode === "link"
-                  ? "bg-primary-muted text-primary"
-                  : "text-text-muted hover:bg-surface-raised hover:text-text",
-              ].join(" ")}
-            >
-              링크 만들기
-            </button>
-          </div>
-
-          {mode === "email" && (
-            <label className="flex flex-col gap-1.5">
-              <span className="text-caption text-text-secondary">이메일</span>
-              <Input
-                type="email"
-                value={email}
-                onChange={(e) => onEmailChange(e.target.value)}
-                placeholder="member@example.com"
-                disabled={submitting || !isAdmin}
-                autoFocus
-              />
-            </label>
-          )}
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="flex flex-col gap-1.5">
-              <span className="text-caption text-text-secondary">역할</span>
-              <select
-                value={role}
-                onChange={(e) => onRoleChange(e.target.value as WorkspaceRole)}
-                disabled={submitting || !isAdmin}
-                className="w-full rounded-md border border-border bg-surface px-3 py-2 text-body text-text focus:outline-none focus:ring-2 focus:ring-primary-light disabled:opacity-50"
-              >
-                <option value="MEMBER">MEMBER</option>
-                <option value="ADMIN">ADMIN</option>
-              </select>
-            </label>
-
-            <label className="flex flex-col gap-1.5">
-              <span className="text-caption text-text-secondary">만료일</span>
-              <select
-                value={expiresInDays}
-                onChange={(e) => onExpiresInDaysChange(Number(e.target.value))}
-                disabled={submitting || !isAdmin}
-                className="w-full rounded-md border border-border bg-surface px-3 py-2 text-body text-text focus:outline-none focus:ring-2 focus:ring-primary-light disabled:opacity-50"
-              >
-                <option value={1}>1일</option>
-                <option value={3}>3일</option>
-                <option value={7}>7일</option>
-                <option value={14}>14일</option>
-                <option value={30}>30일</option>
-              </select>
-            </label>
-          </div>
-
-          {!isAdmin && (
-            <p className="text-caption text-danger">
-              회원 초대는 워크스페이스 ADMIN만 생성할 수 있습니다.
-            </p>
-          )}
-          {error && <p className="text-caption text-danger">{error}</p>}
-
-          {visibleInviteUrl && (
-            <div className="rounded-lg border border-border bg-surface px-3 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-caption font-semibold text-text">
-                  {copied
-                    ? "초대 링크가 복사되었습니다."
-                    : mode === "email"
-                      ? "이메일 초대용 링크"
-                      : "공유용 초대 링크"}
-                </p>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  icon={<Clipboard />}
-                  onClick={() => onCopy(visibleInviteUrl, mode)}
-                >
-                  복사
-                </Button>
-              </div>
-              <p className="mt-2 break-all text-micro text-text-muted">{visibleInviteUrl}</p>
-            </div>
-          )}
-        </Modal.Body>
-
-        <Modal.Footer>
-          <Button type="button" variant="ghost" onClick={onClose} disabled={submitting}>
-            닫기
-          </Button>
-          {mode === "link" ? (
-            <Button
-              type="button"
-              icon={<Clipboard />}
-              loading={submitting}
-              disabled={!isAdmin}
-              onClick={onCreateLinkOnly}
-            >
-              링크 만들기
-            </Button>
-          ) : (
-            <Button type="submit" icon={<UserPlus />} loading={submitting} disabled={!isAdmin}>
-              초대 보내기
-            </Button>
-          )}
         </Modal.Footer>
       </form>
     </Modal>
@@ -1945,18 +2752,4 @@ function taskAssigneeName(task: WorkspaceTask, actors: OfficeActor[]) {
   if (!assigneeId) return "담당자 미배정";
   const actor = actors.find((item) => String(item.id) === String(assigneeId));
   return actor ? `담당 ${actor.name}` : `담당 ID ${assigneeId}`;
-}
-
-function formatDateTime(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString("ko-KR", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
 }

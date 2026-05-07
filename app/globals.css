@@ -35,8 +35,9 @@
   --color-text-dim: var(--text-dim);
 
   /* Fonts */
-  --font-sans: "Segoe UI", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
-  --font-mono: "SFMono-Regular", "SF Mono", "Cascadia Code", "JetBrains Mono", "Fira Code", "Consolas", monospace;
+  --font-sans: var(--font-geist-sans), "Segoe UI", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: var(--font-mono-arcade), "SFMono-Regular", "SF Mono", "Cascadia Code", "JetBrains Mono", "Fira Code", "Consolas", monospace;
+  --font-pixel: var(--font-pixel), "Press Start 2P", var(--font-vt323), "VT323", "Courier New", monospace;
 }
 
 /* Typography utilities */
@@ -67,10 +68,22 @@
 }
 
 body {
-  background:
-    linear-gradient(180deg, #e7f3ff 0%, #f7fbff 34%, #fbfdf8 100%);
+  background: var(--t4-bg);
   color: var(--text);
   font-family: var(--font-sans);
+}
+
+.font-pixel {
+  font-family: var(--font-pixel), "Press Start 2P", "VT323", "Courier New", monospace;
+  letter-spacing: 0.04em;
+}
+
+.font-vt {
+  font-family: var(--font-vt323), "VT323", "Courier New", monospace;
+}
+
+.font-arcade-mono {
+  font-family: var(--font-mono-arcade), "JetBrains Mono", "Consolas", monospace;
 }
 
 .scrollbar-hide {

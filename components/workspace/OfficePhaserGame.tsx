@@ -9,12 +9,14 @@ import {
 
 interface OfficePhaserGameProps {
   agents: OfficeAgentState[];
+  controllableId?: string | number | null;
   onAgentClick?: (agent: OfficeAgentState) => void;
   onAgentContextMenu?: (event: OfficeAgentContextEvent) => void;
 }
 
 export default function OfficePhaserGame({
   agents,
+  controllableId,
   onAgentClick,
   onAgentContextMenu,
 }: OfficePhaserGameProps) {
@@ -35,7 +37,10 @@ export default function OfficePhaserGame({
       import("@/game/office/main").then(({ createOfficeGame }) => {
         if (disposed || !containerRef.current || gameRef.current) return;
         gameRef.current = createOfficeGame(containerRef.current);
-        requestAnimationFrame(() => OfficeEventBus.emit("agents:update", agentsRef.current));
+        requestAnimationFrame(() => {
+          OfficeEventBus.emit("controllable:set", controllableId ?? null);
+          OfficeEventBus.emit("agents:update", agentsRef.current);
+        });
         observer?.disconnect();
         observer = null;
       });
@@ -59,6 +64,10 @@ export default function OfficePhaserGame({
     agentsRef.current = agents;
     OfficeEventBus.emit("agents:update", agents);
   }, [agents]);
+
+  useEffect(() => {
+    OfficeEventBus.emit("controllable:set", controllableId ?? null);
+  }, [controllableId]);
 
   useEffect(() => {
     if (!onAgentClick) return;

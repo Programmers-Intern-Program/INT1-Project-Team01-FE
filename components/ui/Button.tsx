@@ -12,16 +12,20 @@ export interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement
 }
 
 const VARIANT_CLASSES: Record<string, string> = {
-  primary: "border border-primary-light/70 bg-primary text-white hover:bg-primary-hover",
-  secondary: "border border-[var(--neon-border)] bg-surface text-text-secondary hover:bg-primary-muted hover:text-text",
-  danger: "bg-danger-bg text-white hover:brightness-90",
-  ghost: "border border-transparent bg-transparent text-text-muted hover:border-[var(--neon-border-muted)] hover:bg-surface hover:text-text",
+  primary:
+    "border bg-[color:var(--t4-pink)] text-black hover:brightness-110 [border-color:var(--t4-pink)] shadow-[0_0_12px_var(--t4-pink)]",
+  secondary:
+    "border bg-transparent text-[color:var(--t4-mp)] hover:bg-[color:rgba(90,168,255,0.08)] [border-color:var(--t4-mp)]",
+  danger:
+    "border bg-[color:var(--t4-hp)] text-black hover:brightness-110 [border-color:var(--t4-hp)] shadow-[0_0_12px_var(--t4-hp)]",
+  ghost:
+    "border border-transparent bg-transparent text-[color:var(--t4-dim)] hover:text-[color:var(--t4-ink)] hover:[border-color:var(--t4-line)]",
 };
 
 const SIZE_CLASSES: Record<string, string> = {
-  sm: "h-8 px-2.5 text-caption rounded-md gap-1.5",
-  md: "h-9 px-3.5 text-body rounded-md gap-2",
-  lg: "h-11 px-5 text-title rounded-lg gap-2.5",
+  sm: "h-8 px-3 text-[10px] gap-1.5 font-pixel uppercase tracking-[1.5px]",
+  md: "h-9 px-4 text-[10px] gap-2 font-pixel uppercase tracking-[1.5px]",
+  lg: "h-11 px-5 text-[11px] gap-2.5 font-pixel uppercase tracking-[2px]",
 };
 
 const ICON_SIZE: Record<string, string> = {
