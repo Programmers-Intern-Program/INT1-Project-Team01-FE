@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { use, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Clipboard, Info, Mail, RefreshCw, Trash2, UserPlus, Users } from "lucide-react";
 import { Button, Input, Modal } from "@/components/ui";
-import { T4Screen, T4Panel } from "@/components/arcade";
+import { GlyphText, T4Screen, T4Panel } from "@/components/arcade";
 import { t4 } from "@/components/arcade/tokens";
 import {
   WorkspaceErrorState,
@@ -324,7 +324,7 @@ export default function WorkspaceSettingsPage({
             textDecoration: "none",
           }}
         >
-          ◀ BACK TO WORKSPACE
+          <GlyphText glyph="◀">BACK TO WORKSPACE</GlyphText>
         </Link>
 
         <div>
@@ -337,7 +337,7 @@ export default function WorkspaceSettingsPage({
               marginBottom: 4,
             }}
           >
-            ◆ ROLE · {state.workspace.myRole}
+            <GlyphText glyph="◆">ROLE · {state.workspace.myRole}</GlyphText>
           </div>
           <h1
             style={{
@@ -414,7 +414,7 @@ export default function WorkspaceSettingsPage({
                   letterSpacing: 1.5,
                 }}
               >
-                ♦ {state.workspace.name.toUpperCase()}
+                <GlyphText glyph="♦" truncate>{state.workspace.name.toUpperCase()}</GlyphText>
               </p>
               <p
                 className="mt-3"
@@ -425,7 +425,9 @@ export default function WorkspaceSettingsPage({
                   letterSpacing: 1,
                 }}
               >
-                ◇ MEMBERS {String(state.members.length).padStart(2, "0")} · ADMIN {String(adminCount).padStart(2, "0")}
+                <GlyphText glyph="◇">
+                  MEMBERS {String(state.members.length).padStart(2, "0")} · ADMIN {String(adminCount).padStart(2, "0")}
+                </GlyphText>
               </p>
             </T4Panel>
           </aside>
@@ -457,7 +459,7 @@ export default function WorkspaceSettingsPage({
                       />
                     </Field>
                     {updateError && (
-                      <p style={errorStyle}>⚠ {updateError}</p>
+                      <p style={errorStyle}><GlyphText glyph="⚠">{updateError}</GlyphText></p>
                     )}
                     <div className="flex justify-end">
                       <Button type="submit" loading={updateBusy} disabled={!isAdmin}>SAVE</Button>
@@ -486,7 +488,7 @@ export default function WorkspaceSettingsPage({
                           margin: 0,
                         }}
                       >
-                        ⚠ DELETE WORKSPACE
+                        <GlyphText glyph="⚠">DELETE WORKSPACE</GlyphText>
                       </h2>
                       <p
                         className="mt-2"
@@ -508,7 +510,7 @@ export default function WorkspaceSettingsPage({
             {activeSection === "members" && (
               <T4Panel label="ROSTER" accent={t4.mp} style={{ position: "relative", padding: 22 }}>
                 <SectionTitle title="ROSTER" description="Inspect every workspace member and remove with ADMIN privilege." />
-                {memberError && <p className="mt-3" style={errorStyle}>⚠ {memberError}</p>}
+                {memberError && <p className="mt-3" style={errorStyle}><GlyphText glyph="⚠">{memberError}</GlyphText></p>}
                 <div className="mt-5 grid gap-2">
                   {state.members.map((member) => (
                     <div
@@ -529,7 +531,7 @@ export default function WorkspaceSettingsPage({
                             color: t4.ink,
                           }}
                         >
-                          ● {member.name.toUpperCase()}
+                          <GlyphText glyph="●" truncate>{member.name.toUpperCase()}</GlyphText>
                         </p>
                         <p
                           className="truncate"
@@ -587,7 +589,7 @@ export default function WorkspaceSettingsPage({
                           color: t4.dim,
                         }}
                       >
-                        ◇ MODE
+                        <GlyphText glyph="◇">MODE</GlyphText>
                       </p>
                       <div
                         className="grid grid-cols-2 p-1"
@@ -648,7 +650,7 @@ export default function WorkspaceSettingsPage({
                               color: t4.ink,
                             }}
                           >
-                            ◆ SHARE LINK MODE
+                            <GlyphText glyph="◆">SHARE LINK MODE</GlyphText>
                           </p>
                           <p
                             className="mt-2"
@@ -678,10 +680,10 @@ export default function WorkspaceSettingsPage({
                       </SelectField>
                     </div>
 
-                    {inviteError && <p style={errorStyle}>⚠ {inviteError}</p>}
+                    {inviteError && <p style={errorStyle}><GlyphText glyph="⚠">{inviteError}</GlyphText></p>}
                     <div className="flex justify-end">
                       <Button type="submit" icon={inviteCreateMode === "email" ? <UserPlus /> : <Clipboard />} loading={inviteBusy} disabled={!isAdmin}>
-                        {inviteCreateMode === "email" ? "▶ SEND" : "▶ COPY LINK"}
+                        {inviteCreateMode === "email" ? "SEND" : "COPY LINK"}
                       </Button>
                     </div>
                   </div>
@@ -704,7 +706,7 @@ export default function WorkspaceSettingsPage({
                             textShadow: `0 0 6px ${t4.xp}`,
                           }}
                         >
-                          ★ SUMMON LINK
+                          <GlyphText glyph="★">SUMMON LINK</GlyphText>
                         </h3>
                         <p
                           className="mt-2"
@@ -747,7 +749,9 @@ export default function WorkspaceSettingsPage({
                             textShadow: `0 0 4px ${t4.ok}`,
                           }}
                         >
-                          ★ {createdInviteCopied ? "LINK COPIED" : "LINK READY"}
+                          <GlyphText glyph="★">
+                            {createdInviteCopied ? "LINK COPIED" : "LINK READY"}
+                          </GlyphText>
                         </p>
                         <p
                           className="mt-2 break-all"
@@ -777,8 +781,8 @@ export default function WorkspaceSettingsPage({
                           }}
                         >
                           {inviteCreateMode === "email"
-                            ? "◇ create an invite to summon a teammate"
-                            : "◇ generate a copy-link to share"}
+                            ? <GlyphText glyph="◇">create an invite to summon a teammate</GlyphText>
+                            : <GlyphText glyph="◇">generate a copy-link to share</GlyphText>}
                         </p>
                       </div>
                     )}
@@ -801,7 +805,7 @@ export default function WorkspaceSettingsPage({
                     <option value="EXPIRED">EXPIRED</option>
                     <option value="REVOKED">REVOKED</option>
                   </SelectField>
-                  {invitesError && <p style={errorStyle}>⚠ {invitesError}</p>}
+                  {invitesError && <p style={errorStyle}><GlyphText glyph="⚠">{invitesError}</GlyphText></p>}
                   <div className="grid gap-3">
                     {invites.length > 0 ? invites.map((invite) => (
                       <InviteRow
@@ -824,7 +828,7 @@ export default function WorkspaceSettingsPage({
                           border: `1px dashed ${t4.line}`,
                         }}
                       >
-                        ◇ no invites match this filter.
+                        <GlyphText glyph="◇">no invites match this filter.</GlyphText>
                       </p>
                     )}
                   </div>
@@ -847,7 +851,7 @@ export default function WorkspaceSettingsPage({
           >
             <span style={{ color: t4.hp, fontWeight: 700 }}>{state.workspace.name}</span> 워크스페이스를 영구 삭제합니다.
           </p>
-          {deleteError && <p className="mt-3" style={errorStyle}>⚠ {deleteError}</p>}
+          {deleteError && <p className="mt-3" style={errorStyle}><GlyphText glyph="⚠">{deleteError}</GlyphText></p>}
         </Modal.Body>
         <Modal.Footer>
           <Button type="button" variant="ghost" disabled={deleteBusy} onClick={() => setDeleteOpen(false)}>CANCEL</Button>
@@ -875,7 +879,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
           color: t4.dim,
         }}
       >
-        ◇ {label}
+        <GlyphText glyph="◇">{label}</GlyphText>
       </span>
       {children}
     </label>
@@ -905,7 +909,7 @@ function SelectField({
           color: t4.dim,
         }}
       >
-        ◇ {label}
+        <GlyphText glyph="◇">{label}</GlyphText>
       </span>
       <select
         value={value}
@@ -959,7 +963,9 @@ function ArcadeNavButton({
       <span className="flex h-4 w-4 shrink-0 items-center justify-center [&>svg]:h-4 [&>svg]:w-4">
         {icon}
       </span>
-      <span className="min-w-0 truncate">{active ? "▶ " : "  "}{label}</span>
+      <span className="min-w-0 truncate">
+        {active ? <GlyphText glyph="▶" truncate>{label}</GlyphText> : <span className="pl-[calc(1.1em+6px)]">{label}</span>}
+      </span>
     </button>
   );
 }
@@ -1010,7 +1016,7 @@ function SectionTitle({ title, description }: { title: string; description: stri
           margin: 0,
         }}
       >
-        ◆ {title}
+        <GlyphText glyph="◆">{title}</GlyphText>
       </h2>
       <p
         className="mt-2"
@@ -1151,7 +1157,7 @@ function InviteRow({
                 letterSpacing: 1,
               }}
             >
-              ✉ {EMAIL_STATUS_LABEL[invite.emailStatus] ?? invite.emailStatus}
+              <GlyphText glyph="✉">{EMAIL_STATUS_LABEL[invite.emailStatus] ?? invite.emailStatus}</GlyphText>
             </span>
           </div>
           <p
@@ -1173,7 +1179,9 @@ function InviteRow({
               color: t4.dim,
             }}
           >
-            ◆ {invite.targetEmail ?? "SHARE LINK"} · expires {formatDate(invite.expiresAt)}
+            <GlyphText glyph="◆">
+              {invite.targetEmail ?? "SHARE LINK"} · expires {formatDate(invite.expiresAt)}
+            </GlyphText>
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">

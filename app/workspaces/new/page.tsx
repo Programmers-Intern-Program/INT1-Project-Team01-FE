@@ -6,7 +6,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Button, Input, Textarea } from "@/components/ui";
 import { getStoredUser, type ApiError } from "@/lib/api-client";
 import { createWorkspace } from "@/lib/api/workspaces";
-import { T4Screen, T4Panel } from "@/components/arcade";
+import { GlyphText, T4Screen, T4Panel } from "@/components/arcade";
 import { t4 } from "@/components/arcade/tokens";
 
 const NAME_MAX = 100;
@@ -84,7 +84,7 @@ export default function NewWorkspacePage() {
             textDecoration: "none",
           }}
         >
-          ◀ BACK TO WORKSPCAES
+          <GlyphText glyph="◀">BACK TO WORKSPACES</GlyphText>
         </Link>
 
         <div>
@@ -97,7 +97,7 @@ export default function NewWorkspacePage() {
               marginBottom: 4,
             }}
           >
-            ◆ STEP 01 / 02
+            <GlyphText glyph="◆">STEP 01 / 02</GlyphText>
           </div>
           <h1
             style={{
@@ -162,7 +162,7 @@ export default function NewWorkspacePage() {
                   color: t4.hp,
                 }}
               >
-                ⚠ {error}
+                <GlyphText glyph="⚠">{error}</GlyphText>
               </p>
             )}
 
@@ -173,7 +173,7 @@ export default function NewWorkspacePage() {
                 </Button>
               </Link>
               <Button type="submit" loading={submitting}>
-                ▶ FORM WORKSPACE
+                <GlyphText glyph="▶">FORM WORKSPACE</GlyphText>
               </Button>
             </div>
           </form>
@@ -205,10 +205,12 @@ function Field({
             color: t4.dim,
           }}
         >
-          ◇ {label}
-          {required && (
-            <span style={{ color: t4.hp, marginLeft: 4 }}>*</span>
-          )}
+          <GlyphText glyph="◇">
+            {label}
+            {required && (
+              <span style={{ color: t4.hp, marginLeft: 4 }}>*</span>
+            )}
+          </GlyphText>
         </span>
         {counter && (
           <span

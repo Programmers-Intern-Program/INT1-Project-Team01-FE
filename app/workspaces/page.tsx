@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { getStoredUser, type AuthUser, type ApiError } from "@/lib/api-client";
 import { logout } from "@/lib/auth";
 import { listWorkspaces, type WorkspaceSummary } from "@/lib/api/workspaces";
-import { T4Screen, T4Panel, PixelAvatar } from "@/components/arcade";
+import { GlyphText, T4Screen, T4Panel, PixelAvatar } from "@/components/arcade";
 import { t4 } from "@/components/arcade/tokens";
 
 export default function WorkspacesPage() {
@@ -105,7 +105,7 @@ export default function WorkspacesPage() {
                 marginBottom: 4,
               }}
             >
-              ◆ HERO {user?.name ?? "PLAYER"}
+              <GlyphText glyph="◆">HERO {user?.name ?? "PLAYER"}</GlyphText>
             </div>
             <h2
               style={{
@@ -132,11 +132,13 @@ export default function WorkspacesPage() {
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <Link href="/workspaces/gateway">
-              <ArcadeButton color={t4.mp}>◇ GATEWAY</ArcadeButton>
+              <ArcadeButton color={t4.mp}>
+                <GlyphText glyph="◇">GATEWAY</GlyphText>
+              </ArcadeButton>
             </Link>
             <Link href="/workspaces/new">
               <ArcadeButton color={t4.pink} primary>
-                ▶ NEW WORKSPACE
+                <GlyphText glyph="▶">NEW WORKSPACE</GlyphText>
               </ArcadeButton>
             </Link>
             <ArcadeButton color={t4.dim} onClick={handleLogout}>
@@ -237,7 +239,7 @@ export default function WorkspacesPage() {
                 textAlign: "center",
               }}
             >
-              ⚠ {error}
+              <GlyphText glyph="⚠">{error}</GlyphText>
             </div>
           ) : workspaces.length === 0 ? (
             <EmptyState />
@@ -306,9 +308,11 @@ function WorkspaceRow({
       <div>
         <div
           style={{
-            fontFamily: "var(--font-pixel)",
-            fontSize: 10,
-            letterSpacing: 1,
+            fontFamily: "var(--font-mixed-ko)",
+            fontSize: 14,
+            fontWeight: 700,
+            letterSpacing: 0,
+            lineHeight: 1.25,
             color: t4.ink,
             marginBottom: 4,
           }}
@@ -318,7 +322,7 @@ function WorkspaceRow({
         <div
           style={{
             fontFamily: "var(--font-mono-arcade)",
-            fontSize: 9,
+            fontSize: 11,
             color: t4.dim,
             marginTop: 2,
           }}
@@ -345,7 +349,7 @@ function WorkspaceRow({
           color: t4.agent,
         }}
       >
-        ◇ {workspace.agentCount} agents
+        <GlyphText glyph="◇">{workspace.agentCount} agents</GlyphText>
       </div>
       <div
         style={{
@@ -354,7 +358,7 @@ function WorkspaceRow({
           color: t4.ok,
         }}
       >
-        ▷ {workspace.runningTaskCount} active
+        <GlyphText glyph="▷">{workspace.runningTaskCount} active</GlyphText>
       </div>
       <div
         style={{
@@ -367,7 +371,7 @@ function WorkspaceRow({
           border: `1px solid ${accent}`,
         }}
       >
-        ▶ ENTER
+        <GlyphText glyph="▶">ENTER</GlyphText>
       </div>
     </Link>
   );
@@ -438,7 +442,7 @@ function EmptyState() {
           boxShadow: `0 0 14px ${t4.pink}`,
         }}
       >
-        ▶ CREATE WORKSPACE
+        <GlyphText glyph="▶">CREATE WORKSPACE</GlyphText>
       </Link>
     </div>
   );

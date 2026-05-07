@@ -20,7 +20,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import { Button, Input, Modal } from "@/components/ui";
-import { T4Panel, PixelAvatar, type PixelAvatarKind } from "@/components/arcade";
+import { GlyphText, T4Panel, PixelAvatar, type PixelAvatarKind } from "@/components/arcade";
 import { t4 } from "@/components/arcade/tokens";
 import {
   WorkspaceErrorState,
@@ -690,7 +690,7 @@ function GameTopNav({
             textDecoration: "none",
           }}
         >
-          ◀ WORKSPACES
+          <GlyphText glyph="◀">WORKSPACES</GlyphText>
         </Link>
         <span style={{ color: t4.line }}>·</span>
         <div className="min-w-0">
@@ -704,7 +704,7 @@ function GameTopNav({
               textShadow: `0 0 8px ${t4.pink}80`,
             }}
           >
-            ♦ {workspace.name.toUpperCase()}
+            <GlyphText glyph="♦" truncate>{workspace.name.toUpperCase()}</GlyphText>
           </p>
           <p
             className="truncate"
@@ -1005,7 +1005,11 @@ function StageRoom({
           textShadow: `0 0 8px ${room.color}`,
         }}
       >
-        {room.label}
+        {room.label.startsWith("♦ ") ? (
+          <GlyphText glyph="♦">{room.label.slice(2)}</GlyphText>
+        ) : (
+          room.label
+        )}
       </div>
       {room.variant === "engineering" && <EngineeringPlatforms />}
       {room.variant === "huddle" && <HuddleTable />}
@@ -1234,7 +1238,9 @@ function ActorContextMenu({
         }}
       >
         <MessageCircle className="h-3.5 w-3.5" />
-        {menu.actor.kind === "agent" ? "▶ TALK TO AGENT" : "▶ TALK"}
+        <GlyphText glyph="▶">
+          {menu.actor.kind === "agent" ? "TALK TO AGENT" : "TALK"}
+        </GlyphText>
       </button>
     </div>
   );
@@ -1315,8 +1321,9 @@ function ActorChatSidePanel({
                 textShadow: `0 0 6px ${accent}`,
               }}
             >
-              {isAgent ? "◇ " : "● "}
-              {target.name.toUpperCase()}
+              <GlyphText glyph={isAgent ? "◇" : "●"} truncate>
+                {target.name.toUpperCase()}
+              </GlyphText>
             </p>
             <p
               className="truncate"
@@ -1365,7 +1372,7 @@ function ActorChatSidePanel({
                 padding: "20px 10px",
               }}
             >
-              ◆ no chatter yet — say hi!
+              <GlyphText glyph="◆">no chatter yet - say hi!</GlyphText>
             </div>
           )}
           {messages.map((message) => {
@@ -1386,7 +1393,7 @@ function ActorChatSidePanel({
                     textShadow: `0 0 6px ${t4.xp}`,
                   }}
                 >
-                  ★ {message.text}
+                  <GlyphText glyph="★">{message.text}</GlyphText>
                 </div>
               );
             }
@@ -1432,7 +1439,7 @@ function ActorChatSidePanel({
                 textShadow: `0 0 4px ${t4.xp}`,
               }}
             >
-              ◆ ASSIGN QUEST
+              <GlyphText glyph="◆">ASSIGN QUEST</GlyphText>
             </p>
             <Input
               value={taskTitle}
@@ -1463,7 +1470,7 @@ function ActorChatSidePanel({
                   color: t4.hp,
                 }}
               >
-                ⚠ {taskError}
+                <GlyphText glyph="⚠">{taskError}</GlyphText>
               </p>
             )}
             <Button type="submit" size="sm" icon={<Plus />} loading={taskSubmitting}>
@@ -1481,7 +1488,7 @@ function ActorChatSidePanel({
               background: "rgba(0,0,0,0.4)",
             }}
           >
-            ◇ Real-time API not wired yet — messages stay local for now.
+            <GlyphText glyph="◇">Real-time API not wired yet - messages stay local for now.</GlyphText>
           </p>
         )}
 
@@ -1669,8 +1676,12 @@ function MapHud({
           color: t4.dim,
         }}
       >
-        <span>◆ {String(totalActors).padStart(2, "0")} ALLIES</span>
-        <span style={{ color: t4.mp }}>● YOU</span>
+        <span>
+          <GlyphText glyph="◆">{String(totalActors).padStart(2, "0")} ALLIES</GlyphText>
+        </span>
+        <span style={{ color: t4.mp }}>
+          <GlyphText glyph="●">YOU</GlyphText>
+        </span>
       </div>
     </T4Panel>
   );
@@ -1824,8 +1835,9 @@ function DialogueBox({
               textShadow: `0 0 8px ${accent}`,
             }}
           >
-            {isAgent ? "◇ " : featured ? "● " : "★ "}
-            {speaker.toUpperCase()}
+            <GlyphText glyph={isAgent ? "◇" : featured ? "●" : "★"} truncate>
+              {speaker.toUpperCase()}
+            </GlyphText>
           </div>
           <div
             style={{
@@ -1840,7 +1852,7 @@ function DialogueBox({
           <div className="mt-3 flex flex-wrap gap-2">
             {featured ? (
               <DialogueChoice primary onClick={() => onTalk(featured)}>
-                ▶ TALK
+                <GlyphText glyph="▶">TALK</GlyphText>
               </DialogueChoice>
             ) : null}
             <DialogueChoice onClick={onTasks}>QUESTS</DialogueChoice>
@@ -1858,7 +1870,7 @@ function DialogueBox({
             letterSpacing: 2,
           }}
         >
-          ▼ NEXT
+          <GlyphText glyph="▼">NEXT</GlyphText>
         </div>
       </T4Panel>
     </div>

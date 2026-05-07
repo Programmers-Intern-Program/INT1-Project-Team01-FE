@@ -2,6 +2,7 @@
 
 import { useEffect, type ReactNode } from "react";
 import { X } from "lucide-react";
+import { GlyphText } from "@/components/arcade";
 
 const SIZE_CLASSES: Record<string, string> = {
   sm: "max-w-md",
@@ -66,7 +67,9 @@ function ModalRoot({ open, onClose, title, size = "md", disableEscapeClose, chil
                 margin: 0,
               }}
             >
-              ◆ {typeof title === "string" ? title.toUpperCase() : title}
+              <GlyphText glyph="◆">
+                {typeof title === "string" ? title.toUpperCase() : title}
+              </GlyphText>
             </h2>
             <button
               onClick={onClose}

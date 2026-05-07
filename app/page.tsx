@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { isAuthenticated } from "@/lib/auth";
-import { T4Screen, PixelAvatar, type PixelAvatarKind } from "@/components/arcade";
+import { GlyphText, T4Screen, PixelAvatar, type PixelAvatarKind } from "@/components/arcade";
 import { t4 } from "@/components/arcade/tokens";
 
 const WORKSPACE_CREW: Array<[PixelAvatarKind, string, string]> = [
@@ -14,10 +14,8 @@ const WORKSPACE_CREW: Array<[PixelAvatarKind, string, string]> = [
 ];
 
 const MENU = [
-  { label: "NEW GAME", href: "/auth", action: "new" as const },
+  { label: "LOGIN", href: "/auth", action: "login" as const },
   { label: "CONTINUE", href: "/workspaces", action: "continue" as const },
-  { label: "JOIN A WORKSPACE", href: "/auth", action: "join" as const },
-  { label: "SETTINGS", href: "/auth", action: "settings" as const },
 ];
 
 export default function LandingPage() {
@@ -108,7 +106,7 @@ export default function LandingPage() {
               animation: "t4-pulse 1.4s ease-in-out infinite",
             }}
           >
-            ▶ PRESS START
+            <GlyphText glyph="▶">PRESS START</GlyphText>
           </div>
           <h1
             style={{
@@ -216,8 +214,11 @@ export default function LandingPage() {
                     transition: "all 80ms ease-out",
                   }}
                 >
-                  {sel ? "▶ " : "  "}
-                  {item.label}
+                  {sel ? (
+                    <GlyphText glyph="▶">{item.label}</GlyphText>
+                  ) : (
+                    <span className="pl-[calc(1.1em+6px)]">{item.label}</span>
+                  )}
                 </button>
               );
             })}

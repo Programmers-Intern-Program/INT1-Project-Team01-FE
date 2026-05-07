@@ -36,6 +36,7 @@
 
   /* Fonts */
   --font-sans: var(--font-geist-sans), "Segoe UI", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-mixed-ko: "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", "Segoe UI", system-ui, sans-serif;
   --font-mono: var(--font-mono-arcade), "SFMono-Regular", "SF Mono", "Cascadia Code", "JetBrains Mono", "Fira Code", "Consolas", monospace;
   --font-pixel: var(--font-pixel), "Press Start 2P", var(--font-vt323), "VT323", "Courier New", monospace;
 }

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
 import { Button } from "@/components/ui";
-import { T4Screen, T4Panel, PixelAvatar } from "@/components/arcade";
+import { GlyphText, T4Screen, T4Panel, PixelAvatar } from "@/components/arcade";
 import { t4 } from "@/components/arcade/tokens";
 import { getStoredUser, type ApiError } from "@/lib/api-client";
 import {
@@ -106,7 +106,7 @@ export default function InviteAcceptPage({
                 marginBottom: 6,
               }}
             >
-              ◆ INVITATION
+              <GlyphText glyph="◆">INVITATION</GlyphText>
             </div>
             <h1
               style={{
@@ -143,7 +143,7 @@ export default function InviteAcceptPage({
                   color: t4.hp,
                 }}
               >
-                ⚠ {state.message}
+                <GlyphText glyph="⚠">{state.message}</GlyphText>
               </p>
             )}
             {state.kind === "ready" && (
@@ -167,7 +167,7 @@ export default function InviteAcceptPage({
               textAlign: "center",
             }}
           >
-            ▷ MY WORKSPACES
+            <GlyphText glyph="▷">MY WORKSPACES</GlyphText>
           </Link>
         </div>
       </div>
@@ -223,7 +223,7 @@ function InviteBody({
               textShadow: `0 0 6px ${t4.pink}80`,
             }}
           >
-            ♦ {invite.workspaceName.toUpperCase()}
+            <GlyphText glyph="♦" truncate>{invite.workspaceName.toUpperCase()}</GlyphText>
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <span
@@ -263,7 +263,7 @@ function InviteBody({
             background: "rgba(255,85,119,0.06)",
           }}
         >
-          ⚠ {blockedReason}
+          <GlyphText glyph="⚠">{blockedReason}</GlyphText>
         </p>
       )}
 
@@ -276,7 +276,7 @@ function InviteBody({
             textAlign: "center",
           }}
         >
-          ⚠ {acceptError}
+          <GlyphText glyph="⚠">{acceptError}</GlyphText>
         </p>
       )}
 
@@ -286,7 +286,7 @@ function InviteBody({
         disabled={blocked}
         className="w-full"
       >
-        {blocked ? "▶ LOCKED" : "▶ ACCEPT SUMMON"}
+        <GlyphText glyph="▶">{blocked ? "LOCKED" : "ACCEPT SUMMON"}</GlyphText>
       </Button>
     </div>
   );

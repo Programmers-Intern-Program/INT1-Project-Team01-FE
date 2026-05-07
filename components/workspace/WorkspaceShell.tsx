@@ -13,6 +13,7 @@ import {
   Settings,
 } from "lucide-react";
 import { Badge, Button } from "@/components/ui";
+import { GlyphText } from "@/components/arcade";
 import type { WorkspaceDetail } from "@/lib/api/workspaces";
 
 interface WorkspaceShellProps {
@@ -149,7 +150,7 @@ export function WorkspaceErrorState({ message }: { message: string }) {
             marginBottom: 16,
           }}
         >
-          ⚠ ERROR
+          <GlyphText glyph="⚠">ERROR</GlyphText>
         </p>
         <p
           style={{
@@ -161,7 +162,9 @@ export function WorkspaceErrorState({ message }: { message: string }) {
           {message}
         </p>
         <Link href="/workspaces" className="mt-5 inline-flex">
-          <Button variant="secondary">◀ WORKSPACES</Button>
+          <Button variant="secondary">
+            <GlyphText glyph="◀">WORKSPACES</GlyphText>
+          </Button>
         </Link>
       </section>
     </main>
@@ -184,7 +187,7 @@ export function WorkspaceLoadingState() {
           animation: "t4-pulse 1.4s ease-in-out infinite",
         }}
       >
-        ◆ LOADING WORLD…
+        <GlyphText glyph="◆">LOADING WORLD...</GlyphText>
       </div>
     </main>
   );

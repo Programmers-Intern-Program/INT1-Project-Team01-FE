@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import GlyphText from "./GlyphText";
 
 interface T4ScreenProps {
   children: ReactNode;
@@ -86,7 +87,7 @@ export default function T4Screen({
               letterSpacing: 1,
             }}
           >
-            ◆ AI OFFICE
+            <GlyphText glyph="◆">AI OFFICE</GlyphText>
           </span>
           <span style={{ textTransform: "uppercase" }}>{title}</span>
           <span style={{ marginLeft: "auto" }}>FPS 60 · PING 12ms · {clock}</span>

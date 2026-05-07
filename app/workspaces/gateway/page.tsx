@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Button, Input } from "@/components/ui";
-import { T4Screen, T4Panel } from "@/components/arcade";
+import { GlyphText, T4Screen, T4Panel } from "@/components/arcade";
 import { t4 } from "@/components/arcade/tokens";
 import { getStoredUser } from "@/lib/api-client";
 
@@ -125,7 +125,7 @@ export default function GatewayPage() {
             textDecoration: "none",
           }}
         >
-          ◀ BACK TO WORKPLACES
+          <GlyphText glyph="◀">BACK TO WORKPLACES</GlyphText>
         </Link>
 
         <div>
@@ -138,7 +138,7 @@ export default function GatewayPage() {
               marginBottom: 4,
             }}
           >
-            ◆ OPENCLAW · WARP NET
+            <GlyphText glyph="◆">OPENCLAW · WARP NET</GlyphText>
           </div>
           <h1
             style={{
@@ -177,7 +177,7 @@ export default function GatewayPage() {
                     textAlign: "center",
                   }}
                 >
-                  ◇ no gateway linked yet
+                  <GlyphText glyph="◇">no gateway linked yet</GlyphText>
                 </p>
               ) : (
                 <div className="grid gap-2">
@@ -208,7 +208,7 @@ export default function GatewayPage() {
                               color: active ? t4.mp : t4.ink,
                             }}
                           >
-                            ♦ {gateway.displayName.toUpperCase()}
+                            <GlyphText glyph="♦" truncate>{gateway.displayName.toUpperCase()}</GlyphText>
                           </span>
                           <span
                             style={{
@@ -241,7 +241,7 @@ export default function GatewayPage() {
                             color: t4.dim,
                           }}
                         >
-                          ◆ {formatDateTime(gateway.createdAt)}
+                          <GlyphText glyph="◆">{formatDateTime(gateway.createdAt)}</GlyphText>
                         </p>
                       </button>
                     );
@@ -337,7 +337,7 @@ export default function GatewayPage() {
                     color: t4.hp,
                   }}
                 >
-                  ⚠ {error}
+                  <GlyphText glyph="⚠">{error}</GlyphText>
                 </p>
               )}
               {createdMessage && !error && (
@@ -350,7 +350,7 @@ export default function GatewayPage() {
                     textShadow: `0 0 6px ${t4.ok}`,
                   }}
                 >
-                  ★ {createdMessage}
+                  <GlyphText glyph="★">{createdMessage}</GlyphText>
                 </p>
               )}
 
@@ -361,7 +361,7 @@ export default function GatewayPage() {
                   </Button>
                 </Link>
                 <Button type="submit" loading={submitting}>
-                  ▶ LINK GATE
+                  <GlyphText glyph="▶">LINK GATE</GlyphText>
                 </Button>
               </div>
             </form>
@@ -400,8 +400,10 @@ function Field({
             color: t4.dim,
           }}
         >
-          ◇ {label}
-          {required && <span style={{ color: t4.hp, marginLeft: 4 }}>*</span>}
+          <GlyphText glyph="◇">
+            {label}
+            {required && <span style={{ color: t4.hp, marginLeft: 4 }}>*</span>}
+          </GlyphText>
         </span>
         {counter && (
           <span
