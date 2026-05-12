@@ -88,7 +88,21 @@ export default function SlackIntegrationSuccessPage() {
         </h1>
         <p className="mt-4 text-body text-text-muted">{message}</p>
         <div className="mt-6 flex justify-end">
-          <Button type="button" onClick={() => router.push(returnTo)}>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => router.push(returnTo)}
+            style={{
+              fontFamily: "var(--font-mixed-ko)",
+              textTransform: "none",
+              letterSpacing: "normal",
+              fontSize: 12,
+              fontWeight: 600,
+              borderColor: t4.ok,
+              color: t4.ok,
+              boxShadow: "none",
+            }}
+          >
             연동 목록으로 이동
           </Button>
         </div>
