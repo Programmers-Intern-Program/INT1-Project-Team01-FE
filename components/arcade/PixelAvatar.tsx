@@ -34,41 +34,147 @@ export const PA_PALETTES: Record<PixelAvatarKind, Palette> = {
   agent: { skin:"#d0d8e0", skin2:"#8090a0", hair:"#1a1a2a", hair2:"#0a0a1a", shirt:"#1a1a2a", shirt2:"#0a0a1a", pants:"#1a1a2a", shoe:"#0a0a0a", eye:"#7afff0", mouth:"#7afff0" },
 };
 
-const PA_FRAME_DEFAULT = [
-  "....HHHH....",
-  "...HhhhhH...",
-  "..HhhhhhhH..",
-  "..HsssssH...",
-  "..SsEssEsS..",
-  "..SsssssS...",
-  "..sSMMMSs...",
-  "..sSSSSSs...",
-  ".TTTTTTTTT..",
-  "TTtTTTTTtTT.",
-  "TTtTTTTTtTT.",
-  ".TTPPPPPTT..",
-  "..PP...PP...",
-  "..BB...BB...",
-];
+export type PixelAvatarDirection = "S" | "N" | "E" | "W";
 
-const PA_FRAME_WALK = [
-  "....HHHH....",
-  "...HhhhhH...",
-  "..HhhhhhhH..",
-  "..HsssssH...",
-  "..SsEssEsS..",
-  "..SsssssS...",
-  "..sSMMMSs...",
-  "..sSSSSSs...",
-  ".TTTTTTTTT..",
-  "TTtTTTTTtTT.",
-  "TTtTTTTTtTT.",
-  "..TPPPPPT...",
-  "..PP....PP..",
-  "..BB....BB..",
-];
+const HERO_FRAMES: Record<PixelAvatarDirection, string[]> = {
+  S: [
+    "...HHHHHH.......",
+    "..HhhhhhhH......",
+    ".HhhsssshhH.....",
+    ".HsEss ssEsH....",
+    "..SsssssssS.....",
+    "..SsMMMssS......",
+    ".TTTTTTTTTT.....",
+    "TtTTTTTTTtT.....",
+    "TtTTTTTTTtT.....",
+    "TtTPPPPPTtT.....",
+    ".TTPPPPPPTT.....",
+    "..PP....PP......",
+    "..PP....PP......",
+    "..BB....BB......",
+  ],
+  N: [
+    "...HHHHHH.......",
+    "..HhhhhhhH......",
+    ".HhhhhhhhhH.....",
+    ".HhhhhhhhhH.....",
+    "..HhhhhhhH......",
+    "..ShhhhhhS......",
+    ".TTTTTTTTTT.....",
+    "TtTTTTTTTtT.....",
+    "TtTTTTTTTtT.....",
+    "TtTPPPPPTtT.....",
+    ".TTPPPPPPTT.....",
+    "..PP....PP......",
+    "..PP....PP......",
+    "..BB....BB......",
+  ],
+  E: [
+    "...HHHHHH.......",
+    "..HhhhhhhH......",
+    "..HsshhhshH.....",
+    "..HssssEsS......",
+    "..SssssssS......",
+    "..SsMMsssS......",
+    ".TTTTTTTTT......",
+    "TtTTTTTTTt......",
+    "TtTTTTTTTt......",
+    "TtTPPPPPPt......",
+    ".TTPPPPPPP......",
+    "..PP...PPP......",
+    "..PP...PP.......",
+    "..BB....B.......",
+  ],
+  W: [
+    "...HHHHHH.......",
+    "..HhhhhhhH......",
+    ".HshhhssH.......",
+    ".SsEssss H......",
+    ".SsssssssS......",
+    ".Ssss MMsS......",
+    ".TTTTTTTTT......",
+    ".tTTTTTTTtT.....",
+    ".tTTTTTTTtT.....",
+    ".tPPPPPPPTt.....",
+    ".PPPPPPPPTT.....",
+    ".PPP...PP.......",
+    "..PP...PP.......",
+    "..B....BB.......",
+  ],
+};
 
-function paFrameToShadows(frame: string[], pal: Palette, scale: number): string {
+const HERO_WALK_FRAMES: Record<PixelAvatarDirection, string[]> = {
+  S: [
+    "...HHHHHH.......",
+    "..HhhhhhhH......",
+    ".HhhsssshhH.....",
+    ".HsEss ssEsH....",
+    "..SsssssssS.....",
+    "..SsMMMssS......",
+    ".TTTTTTTTTT.....",
+    "TtTTTTTTTtT.....",
+    "TtTTTTTTTtT.....",
+    "TtTPPPPPTtT.....",
+    ".TTPPPPPPTT.....",
+    "..PPP..PP.......",
+    "...PP.PP........",
+    "...BB.BB........",
+  ],
+  N: [
+    "...HHHHHH.......",
+    "..HhhhhhhH......",
+    ".HhhhhhhhhH.....",
+    ".HhhhhhhhhH.....",
+    "..HhhhhhhH......",
+    "..ShhhhhhS......",
+    ".TTTTTTTTTT.....",
+    "TtTTTTTTTtT.....",
+    "TtTTTTTTTtT.....",
+    "TtTPPPPPTtT.....",
+    ".TTPPPPPPTT.....",
+    "..PPP..PP.......",
+    "...PP.PP........",
+    "...BB.BB........",
+  ],
+  E: [
+    "...HHHHHH.......",
+    "..HhhhhhhH......",
+    "..HsshhhshH.....",
+    "..HssssEsS......",
+    "..SssssssS......",
+    "..SsMMsssS......",
+    ".TTTTTTTTT......",
+    "TtTTTTTTTt......",
+    "TtTTTTTTTt......",
+    "TtTPPPPPPt......",
+    ".TTPPPPPPP......",
+    "...PP.PPP.......",
+    "...PP..PP.......",
+    "...BB..B........",
+  ],
+  W: [
+    "...HHHHHH.......",
+    "..HhhhhhhH......",
+    ".HshhhssH.......",
+    ".SsEssss H......",
+    ".SsssssssS......",
+    ".Ssss MMsS......",
+    ".TTTTTTTTT......",
+    ".tTTTTTTTtT.....",
+    ".tTTTTTTTtT.....",
+    ".tPPPPPPPTt.....",
+    ".PPPPPPPPTT.....",
+    ".PPP.PP.........",
+    "..PP..PP........",
+    "..B...BB........",
+  ],
+};
+
+function paFrameToShadows(
+  frame: string[],
+  pal: Palette,
+  scale: number,
+): string {
   const map: Record<string, string> = {
     H: pal.hair, h: pal.hair2,
     S: pal.skin, s: pal.skin2,
@@ -80,7 +186,7 @@ function paFrameToShadows(frame: string[], pal: Palette, scale: number): string 
   for (let y = 0; y < frame.length; y++) {
     for (let x = 0; x < frame[y].length; x++) {
       const ch = frame[y][x];
-      if (ch === "." || !map[ch]) continue;
+      if (ch === "." || ch === " " || !map[ch]) continue;
       parts.push(`${x * scale}px ${y * scale}px 0 0 ${map[ch]}`);
     }
   }
@@ -89,6 +195,7 @@ function paFrameToShadows(frame: string[], pal: Palette, scale: number): string 
 
 interface PixelAvatarProps {
   kind?: PixelAvatarKind;
+  direction?: PixelAvatarDirection;
   size?: number;
   walking?: boolean;
   style?: CSSProperties;
@@ -97,19 +204,19 @@ interface PixelAvatarProps {
 
 export default function PixelAvatar({
   kind = "alex",
+  direction = "S",
   size = 4,
   walking = false,
   style,
   className,
 }: PixelAvatarProps) {
   const pal = PA_PALETTES[kind] || PA_PALETTES.alex;
-  const defaultShadows = useMemo(
-    () => paFrameToShadows(PA_FRAME_DEFAULT, pal, size),
-    [pal, size],
-  );
-  const walkShadows = useMemo(
-    () => paFrameToShadows(PA_FRAME_WALK, pal, size),
-    [pal, size],
+  const frame = walking
+    ? HERO_WALK_FRAMES[direction] || HERO_WALK_FRAMES.S
+    : HERO_FRAMES[direction] || HERO_FRAMES.S;
+  const shadows = useMemo(
+    () => paFrameToShadows(frame, pal, size),
+    [frame, pal, size],
   );
   return (
     <div
@@ -118,33 +225,21 @@ export default function PixelAvatar({
         .join(" ")}
       style={{
         position: "relative",
-        width: 12 * size,
+        width: 16 * size,
         height: 14 * size,
         imageRendering: "pixelated",
         ...style,
       }}
     >
       <div
-        className="pixel-avatar__frame pixel-avatar__frame--idle"
+        className="pixel-avatar__frame"
         style={{
           position: "absolute",
           width: size,
           height: size,
-          boxShadow: defaultShadows,
+          boxShadow: shadows,
         }}
       />
-      {walking && (
-        <div
-          aria-hidden="true"
-          className="pixel-avatar__frame pixel-avatar__frame--walk"
-          style={{
-            position: "absolute",
-            width: size,
-            height: size,
-            boxShadow: walkShadows,
-          }}
-        />
-      )}
     </div>
   );
 }
