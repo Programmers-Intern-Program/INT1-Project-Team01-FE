@@ -80,9 +80,9 @@ export default function WorkspacesPage() {
           height: "100%",
           boxSizing: "border-box",
           display: "grid",
-          gridTemplateRows: "auto auto 1fr",
+          gridTemplateRows: "auto auto minmax(0, 1fr)",
           gap: 14,
-          overflow: "auto",
+          overflow: "hidden",
         }}
       >
         {/* Header */}
@@ -175,7 +175,7 @@ export default function WorkspacesPage() {
               sub: "summoned",
             },
             {
-              label: "TEAM XP / WK",
+              label: "TEAM IMPACT / WK",
               value: "+38k",
               color: t4.xp,
               sub: "↑ 12%",
@@ -225,8 +225,39 @@ export default function WorkspacesPage() {
         <T4Panel
           label="ACTIVE WORKPLACES"
           accent={t4.pink}
-          style={{ position: "relative", padding: 14, minHeight: 220 }}
+          style={{
+            position: "relative",
+            padding: 14,
+            display: "flex",
+            flexDirection: "column",
+            minHeight: 0,
+            overflow: "hidden",
+          }}
         >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "2px 4px 8px",
+              borderBottom: `1px solid ${t4.line}`,
+              marginBottom: 8,
+              fontFamily: "var(--font-mono-arcade)",
+              fontSize: 10,
+              color: t4.dim,
+              letterSpacing: 1,
+              flexShrink: 0,
+            }}
+          >
+            <span>
+              <GlyphText glyph="◆">
+                {String(workspaces.length).padStart(2, "0")} ENTRIES
+              </GlyphText>
+            </span>
+            <span style={{ color: workspaces.length > 8 ? t4.pink : t4.dim }}>
+              {workspaces.length > 8 ? "SCROLL ↓" : "—"}
+            </span>
+          </div>
           {loading ? (
             <ListSkeleton />
           ) : error ? (
@@ -245,10 +276,15 @@ export default function WorkspacesPage() {
             <EmptyState />
           ) : (
             <div
+              className="scrollbar-arcade"
               style={{
                 display: "flex",
                 flexDirection: "column",
                 gap: 8,
+                flex: 1,
+                minHeight: 0,
+                overflowY: "auto",
+                paddingRight: 6,
               }}
             >
               {workspaces.map((ws, idx) => (
