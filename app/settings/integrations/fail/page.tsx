@@ -49,7 +49,21 @@ export default function SlackIntegrationFailPage() {
           Slack 연동을 완료하지 못했습니다. 워크스페이스 연동 화면으로 돌아가 다시 시도하세요.
         </p>
         <div className="mt-6 flex justify-end">
-          <Button type="button" onClick={retry}>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={retry}
+            style={{
+              fontFamily: "var(--font-mixed-ko)",
+              textTransform: "none",
+              letterSpacing: "normal",
+              fontSize: 12,
+              fontWeight: 600,
+              borderColor: t4.hp,
+              color: t4.hp,
+              boxShadow: "none",
+            }}
+          >
             재시도
           </Button>
         </div>

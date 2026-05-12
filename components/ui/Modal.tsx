@@ -21,14 +21,24 @@ export interface ModalProps {
   children: ReactNode;
 }
 
+const modalCloseStack: Array<() => void> = [];
+
 function ModalRoot({ open, onClose, title, size = "md", disableEscapeClose, children }: ModalProps) {
   useEffect(() => {
     if (!open || disableEscapeClose) return;
+    const closer = () => onClose();
+    modalCloseStack.push(closer);
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      if (modalCloseStack[modalCloseStack.length - 1] !== closer) return;
+      onClose();
     };
     document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
+    return () => {
+      document.removeEventListener("keydown", handler);
+      const idx = modalCloseStack.lastIndexOf(closer);
+      if (idx >= 0) modalCloseStack.splice(idx, 1);
+    };
   }, [open, onClose, disableEscapeClose]);
 
   if (!open) return null;
