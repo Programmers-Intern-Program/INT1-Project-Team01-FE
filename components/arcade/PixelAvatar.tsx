@@ -103,14 +103,19 @@ export default function PixelAvatar({
   className,
 }: PixelAvatarProps) {
   const pal = PA_PALETTES[kind] || PA_PALETTES.alex;
-  const frame = walking ? PA_FRAME_WALK : PA_FRAME_DEFAULT;
-  const shadows = useMemo(
-    () => paFrameToShadows(frame, pal, size),
-    [frame, pal, size],
+  const defaultShadows = useMemo(
+    () => paFrameToShadows(PA_FRAME_DEFAULT, pal, size),
+    [pal, size],
+  );
+  const walkShadows = useMemo(
+    () => paFrameToShadows(PA_FRAME_WALK, pal, size),
+    [pal, size],
   );
   return (
     <div
-      className={className}
+      className={["pixel-avatar", walking ? "pixel-avatar--walking" : "", className]
+        .filter(Boolean)
+        .join(" ")}
       style={{
         position: "relative",
         width: 12 * size,
@@ -120,13 +125,26 @@ export default function PixelAvatar({
       }}
     >
       <div
+        className="pixel-avatar__frame pixel-avatar__frame--idle"
         style={{
           position: "absolute",
           width: size,
           height: size,
-          boxShadow: shadows,
+          boxShadow: defaultShadows,
         }}
       />
+      {walking && (
+        <div
+          aria-hidden="true"
+          className="pixel-avatar__frame pixel-avatar__frame--walk"
+          style={{
+            position: "absolute",
+            width: size,
+            height: size,
+            boxShadow: walkShadows,
+          }}
+        />
+      )}
     </div>
   );
 }

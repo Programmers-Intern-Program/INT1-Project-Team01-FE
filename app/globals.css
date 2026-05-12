@@ -114,3 +114,148 @@ body {
 .scrollbar-arcade::-webkit-scrollbar-thumb:hover {
   background: var(--t4-pink, #ff4fb1);
 }
+
+.pixel-avatar__frame {
+  left: 0;
+  top: 0;
+}
+
+.pixel-avatar--walking .pixel-avatar__frame--idle {
+  animation: pixel-avatar-idle-frame 320ms steps(1, end) infinite;
+}
+
+.pixel-avatar--walking .pixel-avatar__frame--walk {
+  animation: pixel-avatar-walk-frame 320ms steps(1, end) infinite;
+}
+
+.stage-actor {
+  transform-origin: 50% 100%;
+}
+
+.stage-actor__avatar {
+  transform-origin: 50% 100%;
+  will-change: transform, filter;
+}
+
+.stage-actor--idle .stage-actor__avatar {
+  animation: stage-actor-idle 1.9s ease-in-out infinite;
+}
+
+.stage-actor--talking .stage-actor__avatar {
+  animation: stage-actor-talk 1s ease-in-out infinite;
+}
+
+.stage-actor--working .stage-actor__avatar {
+  animation: stage-actor-working 560ms steps(2, end) infinite;
+}
+
+.stage-actor--walking .stage-actor__avatar {
+  animation: stage-actor-player-walk 360ms steps(2, end) infinite;
+}
+
+.stage-actor--walking {
+  transition-timing-function: linear;
+}
+
+.stage-actor__speech {
+  animation: stage-actor-speech 1.8s ease-in-out infinite;
+  transform-origin: 50% 100%;
+  will-change: opacity, filter;
+}
+
+.stage-actor__player-marker {
+  animation: stage-actor-player-marker 900ms steps(2, end) infinite;
+}
+
+@keyframes pixel-avatar-idle-frame {
+  0%,
+  49.9% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes pixel-avatar-walk-frame {
+  0%,
+  49.9% {
+    opacity: 0;
+  }
+  50%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes stage-actor-idle {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes stage-actor-talk {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-5px) rotate(-1deg);
+  }
+}
+
+@keyframes stage-actor-working {
+  0%,
+  100% {
+    transform: translate(-2px, 0) skewX(1deg);
+  }
+  50% {
+    transform: translate(2px, -6px) skewX(-1deg);
+  }
+}
+
+@keyframes stage-actor-player-walk {
+  0%,
+  100% {
+    transform: translate(-2px, 0) skewX(1deg);
+  }
+  50% {
+    transform: translate(2px, -5px) skewX(-1deg);
+  }
+}
+
+@keyframes stage-actor-speech {
+  0%,
+  100% {
+    opacity: 0.94;
+    filter: brightness(1);
+  }
+  50% {
+    opacity: 1;
+    filter: brightness(1.14);
+  }
+}
+
+@keyframes stage-actor-player-marker {
+  0%,
+  100% {
+    transform: translateX(-50%) translateY(0);
+  }
+  50% {
+    transform: translateX(-50%) translateY(-3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pixel-avatar__frame,
+  .stage-actor__avatar,
+  .stage-actor__speech,
+  .stage-actor__player-marker {
+    animation: none !important;
+  }
+}

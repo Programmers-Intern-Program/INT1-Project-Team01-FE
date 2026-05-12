@@ -20,6 +20,7 @@ import {
   Settings,
   ShieldAlert,
   UserPlus,
+  X,
 } from "lucide-react";
 import { Button, Input, Modal } from "@/components/ui";
 import { GlyphText, T4Panel, PixelAvatar, type PixelAvatarKind } from "@/components/arcade";
@@ -29,14 +30,12 @@ import {
   WorkspaceLoadingState,
 } from "@/components/workspace/WorkspaceShell";
 import type { OfficeAgentState } from "@/game/office/EventBus";
-import { getStoredUser, type ApiError } from "@/lib/api-client";
+import { API_BASE, getAccessToken, getStoredUser, type ApiError } from "@/lib/api-client";
 import {
-  createSlackIntegration,
   deleteSlackIntegration,
   getSlackInstallUrl,
   listSlackIntegrations,
   type SlackIntegration,
-  updateSlackIntegration,
 } from "@/lib/api/integrations";
 import {
   createGithubCredential,
@@ -314,9 +313,6 @@ export default function WorkspaceOfficePage({
   const [openClawOpen, setOpenClawOpen] = useState(false);
   const [workspaceLeaveNotice, setWorkspaceLeaveNotice] = useState("");
 
-  const [slackTeamId, setSlackTeamId] = useState("");
-  const [slackChannelId, setSlackChannelId] = useState("");
-  const [botToken, setBotToken] = useState("");
   const [slackBusy, setSlackBusy] = useState(false);
   const [slackDeleting, setSlackDeleting] = useState(false);
   const [slackError, setSlackError] = useState("");
@@ -360,6 +356,11 @@ export default function WorkspaceOfficePage({
   const [stageZoom, setStageZoom] = useState(1);
   const [stagePan, setStagePan] = useState<StagePan>({ x: 0, y: 0 });
   const [stageSize, setStageSize] = useState<StageSize>({ width: 1, height: 1 });
+  const [playerPositionOverride, setPlayerPositionOverride] = useState<{
+    workspaceId: number;
+    actorId: string;
+    position: StageActorPosition;
+  } | null>(null);
   const [chatTarget, setChatTarget] = useState<OfficeActor | null>(null);
   const [chatInitialTab, setChatInitialTab] = useState<"chat" | "tasks">("chat");
   const [chatInput, setChatInput] = useState("");
@@ -588,8 +589,6 @@ export default function WorkspaceOfficePage({
         const next = integrations[0] ?? null;
         setSavedSlack(next);
         if (next) {
-          setSlackTeamId(next.slackTeamId);
-          setSlackChannelId(next.slackChannelId);
           writeStoredIntegration(id, "slack", next);
         }
       })
@@ -672,6 +671,33 @@ export default function WorkspaceOfficePage({
     };
   }, [id, openClawOpen]);
 
+  const storedUser = getStoredUser();
+  const storedMemberId = storedUser?.memberId;
+  const playerActorId = storedMemberId != null ? `member:${storedMemberId}` : null;
+  const {
+    onlineMemberIds,
+    remoteMemberPositions,
+    sendPosition: sendPresencePosition,
+  } = useWorkspacePresence(id, storedMemberId);
+  const defaultPlayerPosition = useMemo(() => {
+    if (state.kind !== "ready" || storedMemberId == null) return null;
+    const memberIndex = state.members.findIndex((member) => member.memberId === storedMemberId);
+    return memberIndex >= 0 ? MEMBER_POSITIONS[memberIndex % MEMBER_POSITIONS.length] : null;
+  }, [state, storedMemberId]);
+
+  const playerPosition =
+    playerPositionOverride?.workspaceId === id && playerPositionOverride.actorId === playerActorId
+      ? playerPositionOverride.position
+      : defaultPlayerPosition;
+  const handlePlayerPositionChange = useCallback(
+    (position: StageActorPosition) => {
+      if (!playerActorId) return;
+      setPlayerPositionOverride({ workspaceId: id, actorId: playerActorId, position });
+      sendPresencePosition(position, "walking");
+    },
+    [id, playerActorId, sendPresencePosition],
+  );
+
   const chatTargetAgentId =
     chatTarget && chatTarget.kind === "agent" ? agentIdFromActor(chatTarget) : null;
   const actors = useMemo(() => {
@@ -722,7 +748,12 @@ export default function WorkspaceOfficePage({
           activeTaskStatus: taskState?.status,
         };
       });
-    const memberActors = state.members.map<OfficeActor>((member, index) => ({
+    const visibleMembers = onlineMemberIds
+      ? state.members.filter(
+          (member) => onlineMemberIds.has(member.memberId) || member.memberId === storedMemberId,
+        )
+      : state.members;
+    const memberActors = visibleMembers.map<OfficeActor>((member, index) => ({
       id: `member:${member.memberId}`,
       name: member.name,
       role: member.role,
@@ -731,7 +762,17 @@ export default function WorkspaceOfficePage({
       kind: "member",
     }));
     return [...agentActors, ...memberActors];
-  }, [hiredAgents, state, tasks, chatSending, chatTargetAgentId, chatSessionIds, orchestrationRuns]);
+  }, [
+    hiredAgents,
+    state,
+    tasks,
+    chatSending,
+    chatTargetAgentId,
+    chatSessionIds,
+    orchestrationRuns,
+    onlineMemberIds,
+    storedMemberId,
+  ]);
 
   const selectedActor = useMemo(
     () => actors.find((actor) => String(actor.id) === selectedActorId) ?? null,
@@ -750,53 +791,10 @@ export default function WorkspaceOfficePage({
   const workingCount = actors.filter((actor) => actor.status === "working").length;
   const adminCount = state.members.filter((member) => member.role === "ADMIN").length;
   const isAdmin = state.workspace.myRole === "ADMIN";
-  const myMemberIndex = state.members.findIndex(
-    (member) => member.memberId === getStoredUser()?.memberId,
-  );
-  const myMiniMapPosition =
-    myMemberIndex >= 0 ? MEMBER_POSITIONS[myMemberIndex % MEMBER_POSITIONS.length] : null;
+  const myMiniMapPosition = playerPosition ?? defaultPlayerPosition;
 
   function handleWorkspaceLeavePlaceholder() {
     setWorkspaceLeaveNotice("워크스페이스 나가기 API가 준비되면 연결됩니다.");
-  }
-
-  async function handleSlackSubmit(e: FormEvent) {
-    e.preventDefault();
-    const editing = Boolean(savedSlack);
-    if (!slackTeamId.trim() || !slackChannelId.trim() || (!editing && !botToken.trim())) {
-      setSlackError(
-        editing
-          ? "Slack Team ID와 Channel ID는 필수입니다."
-          : "Slack Team ID, Channel ID, Bot Token은 필수입니다.",
-      );
-      return;
-    }
-
-    setSlackBusy(true);
-    setSlackError("");
-    setSlackNotice("");
-    try {
-      const res = editing && savedSlack
-        ? await updateSlackIntegration(id, savedSlack.id, {
-            slackTeamId: slackTeamId.trim(),
-            slackChannelId: slackChannelId.trim(),
-            ...(botToken.trim() ? { botToken: botToken.trim() } : {}),
-          })
-        : await createSlackIntegration(id, {
-            slackTeamId: slackTeamId.trim(),
-            slackChannelId: slackChannelId.trim(),
-            botToken: botToken.trim(),
-          });
-      setSavedSlack(res);
-      writeStoredIntegration(id, "slack", res);
-      setSlackNotice(editing ? "Slack 연동 정보를 수정했습니다." : "Slack 연동 정보를 저장했습니다.");
-      setBotToken("");
-    } catch (err) {
-      const apiErr = err as ApiError;
-      setSlackError(apiErr?.message ?? "Slack 연동 저장에 실패했습니다.");
-    } finally {
-      setSlackBusy(false);
-    }
   }
 
   async function handleSlackInstall() {
@@ -1223,9 +1221,15 @@ export default function WorkspaceOfficePage({
           rooms={stageRooms}
           engineeringRows={engineeringRows}
           selectedActorId={selectedActorId}
+          playerActorId={playerActorId}
+          playerPosition={playerPosition}
+          remoteMemberPositions={remoteMemberPositions}
           zoom={stageZoom}
           pan={stagePan}
           onPanChange={setStagePan}
+          onPlayerPositionChange={handlePlayerPositionChange}
+          onOpenTasks={() => setTasksOpen(true)}
+          onOpenChatWithActor={(actor) => openActorChat(actor, "chat")}
           onSizeChange={setStageSize}
           onActorSelect={(actor) => {
             setSelectedActorId(String(actor.id));
@@ -1235,7 +1239,7 @@ export default function WorkspaceOfficePage({
         />
 
         <HeroHud
-          name={getStoredUser()?.name ?? "HERO"}
+          name={storedUser?.name ?? "HERO"}
           memberCount={state.members.length}
           workingCount={workingCount}
         />
@@ -1367,18 +1371,11 @@ export default function WorkspaceOfficePage({
           setSettingsOpen(true);
         }}
         isAdmin={isAdmin}
-        slackTeamId={slackTeamId}
-        onSlackTeamIdChange={setSlackTeamId}
-        slackChannelId={slackChannelId}
-        onSlackChannelIdChange={setSlackChannelId}
-        botToken={botToken}
-        onBotTokenChange={setBotToken}
         saved={savedSlack}
         error={slackError}
         notice={slackNotice}
         submitting={slackBusy}
         deleting={slackDeleting}
-        onSubmit={handleSlackSubmit}
         onInstall={handleSlackInstall}
         onDelete={handleSlackDelete}
       />
@@ -1695,7 +1692,7 @@ interface StageRoomSpec {
   width: string;
   height: string;
   color: string;
-  variant: "engineering" | "huddle" | "lounge" | "library";
+  variant: "engineering" | "huddle" | "rest";
 }
 
 interface MiniMapRoom {
@@ -1713,14 +1710,33 @@ interface StageActorPosition {
   top: string;
 }
 
+type PresenceStatus = "idle" | "walking";
+
+interface WorkspacePresenceState {
+  onlineMemberIds: Set<number> | null;
+  remoteMemberPositions: Record<number, StageActorPosition>;
+  sendPosition: (position: StageActorPosition, status?: PresenceStatus) => void;
+}
+
+interface PresenceSnapshotMember {
+  memberId: number;
+  position?: StageActorPosition | null;
+}
+
 function ArcadeOfficeStage({
   actors,
   rooms,
   engineeringRows,
   selectedActorId,
+  playerActorId,
+  playerPosition,
+  remoteMemberPositions,
   zoom,
   pan,
   onPanChange,
+  onPlayerPositionChange,
+  onOpenTasks,
+  onOpenChatWithActor,
   onSizeChange,
   onActorContextMenu,
   onActorSelect,
@@ -1729,18 +1745,31 @@ function ArcadeOfficeStage({
   rooms: StageRoomSpec[];
   engineeringRows: number;
   selectedActorId: string | null;
+  playerActorId: string | null;
+  playerPosition: StageActorPosition | null;
+  remoteMemberPositions: Record<number, StageActorPosition>;
   zoom: number;
   pan: StagePan;
   onPanChange: (pan: StagePan) => void;
+  onPlayerPositionChange: (position: StageActorPosition) => void;
+  onOpenTasks: () => void;
+  onOpenChatWithActor: (actor: OfficeActor) => void;
   onSizeChange: (size: StageSize) => void;
   onActorContextMenu: (payload: { actor: OfficeActor; x: number; y: number }) => void;
   onActorSelect: (actor: OfficeActor) => void;
 }) {
   const engineeringRoom = rooms.find((r) => r.variant === "engineering") ?? rooms[0];
-  let memberSlot = 0;
-  let agentSlot = 0;
+  const loungeRoom = rooms.find((r) => r.variant === "rest") ?? null;
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const playerWalkTimerRef = useRef<number | null>(null);
+  const actorPositionRef = useRef<Map<string, StageActorPosition>>(new Map());
+  const interactableActorsRef = useRef<Array<{ actor: OfficeActor; position: StageActorPosition }>>([]);
+  const onOpenChatWithActorRef = useRef(onOpenChatWithActor);
+  const actorTravelTimerRef = useRef<Map<string, number>>(new Map());
   const [fixedStageSize, setFixedStageSize] = useState<StageSize | null>(null);
+  const [playerWalking, setPlayerWalking] = useState(false);
+  const [travelingActorIds, setTravelingActorIds] = useState<Set<string>>(() => new Set());
+  const playerNearQuest = playerPosition ? isNearQuestMarker(playerPosition) : false;
   const [drag, setDrag] = useState<{
     pointerId: number;
     startX: number;
@@ -1759,6 +1788,162 @@ function ArcadeOfficeStage({
     setFixedStageSize(size);
     onSizeChange(size);
   }, [onSizeChange]);
+
+  useEffect(() => {
+    onOpenChatWithActorRef.current = onOpenChatWithActor;
+  }, [onOpenChatWithActor]);
+
+  useEffect(() => {
+    const travelTimers = actorTravelTimerRef.current;
+    return () => {
+      if (playerWalkTimerRef.current != null) {
+        window.clearTimeout(playerWalkTimerRef.current);
+      }
+      travelTimers.forEach((timerId) => window.clearTimeout(timerId));
+      travelTimers.clear();
+    };
+  }, []);
+
+  let memberSlot = 0;
+  let agentSlot = 0;
+  let loungeAgentSlot = 0;
+  const renderedActors = actors.map((actor) => {
+    const completedAgent =
+      actor.kind === "agent" &&
+      actor.activeTaskStatus === "COMPLETED" &&
+      !actor.activeTaskCount;
+    const basePosition =
+      actor.kind === "agent"
+        ? getAgentPositionInStage(agentSlot++, engineeringRows, engineeringRoom)
+        : MEMBER_POSITIONS[memberSlot++ % MEMBER_POSITIONS.length];
+    const loungePosition =
+      completedAgent && loungeRoom
+        ? getAgentLoungePosition(loungeAgentSlot++, loungeRoom)
+        : null;
+    const isPlayer = playerActorId != null && String(actor.id) === playerActorId;
+    const remotePosition =
+      actor.kind === "member" && !isPlayer
+        ? remoteMemberPositions[memberIdFromActor(actor) ?? -1]
+        : null;
+    const position =
+      isPlayer && playerPosition ? playerPosition : remotePosition ?? loungePosition ?? basePosition;
+    const actorId = String(actor.id);
+    return {
+      actor,
+      isPlayer,
+      position,
+      traveling: travelingActorIds.has(actorId),
+    };
+  });
+
+  useEffect(() => {
+    interactableActorsRef.current = renderedActors
+      .filter((item) => !item.isPlayer)
+      .map((item) => ({ actor: item.actor, position: item.position }));
+    const nextPositions = new Map<string, StageActorPosition>();
+    for (const item of renderedActors) {
+      const actorId = String(item.actor.id);
+      const previousPosition = actorPositionRef.current.get(actorId);
+      nextPositions.set(actorId, item.position);
+      if (
+        item.actor.kind !== "agent" ||
+        !previousPosition ||
+        sameStagePosition(previousPosition, item.position)
+      ) {
+        continue;
+      }
+
+      window.setTimeout(() => {
+        setTravelingActorIds((prev) => {
+          if (prev.has(actorId)) return prev;
+          const next = new Set(prev);
+          next.add(actorId);
+          return next;
+        });
+      }, 0);
+
+      const existingTimer = actorTravelTimerRef.current.get(actorId);
+      if (existingTimer != null) {
+        window.clearTimeout(existingTimer);
+      }
+      const timerId = window.setTimeout(() => {
+        actorTravelTimerRef.current.delete(actorId);
+        setTravelingActorIds((prev) => {
+          if (!prev.has(actorId)) return prev;
+          const next = new Set(prev);
+          next.delete(actorId);
+          return next;
+        });
+      }, AGENT_TRAVEL_DURATION_MS);
+      actorTravelTimerRef.current.set(actorId, timerId);
+    }
+    actorPositionRef.current = nextPositions;
+  });
+
+  useEffect(() => {
+    if (!playerPosition || !fixedStageSize) return;
+    const playerLeftPct = parseStagePct(playerPosition.left);
+    const playerTopPct = parseStagePct(playerPosition.top);
+    const targetX = -((playerLeftPct - 50) / 100) * fixedStageSize.width * zoom;
+    const targetY = -((playerTopPct - 50) / 100) * fixedStageSize.height * zoom;
+    onPanChange({ x: targetX, y: targetY });
+  }, [playerPosition, fixedStageSize, zoom, onPanChange]);
+
+  useEffect(() => {
+    const stageSizeForKeyboard = fixedStageSize;
+    const currentPlayerPosition = playerPosition;
+    if (!playerActorId || !currentPlayerPosition || !stageSizeForKeyboard) return;
+    const keyboardPosition: StageActorPosition = currentPlayerPosition;
+    const keyboardStageSize: StageSize = stageSizeForKeyboard;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "/") {
+        if (event.metaKey || event.ctrlKey || event.altKey) return;
+        if (shouldIgnoreStageMovementKey(event.target)) return;
+        if (isNearQuestMarker(keyboardPosition)) {
+          event.preventDefault();
+          onOpenTasks();
+          return;
+        }
+        const nearestActor = findNearestInteractableActor(
+          keyboardPosition,
+          interactableActorsRef.current,
+        );
+        if (nearestActor) {
+          event.preventDefault();
+          onOpenChatWithActorRef.current(nearestActor);
+          return;
+        }
+        return;
+      }
+
+      const direction = getPlayerMoveDirection(event.key);
+      if (!direction || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (shouldIgnoreStageMovementKey(event.target)) return;
+
+      event.preventDefault();
+      const stepPx = event.shiftKey ? PLAYER_MOVE_FAST_STEP_PX : PLAYER_MOVE_STEP_PX;
+      const nextPosition = moveStagePosition(
+        keyboardPosition,
+        (direction.x * stepPx * 100) / Math.max(1, keyboardStageSize.width * zoom),
+        (direction.y * stepPx * 100) / Math.max(1, keyboardStageSize.height * zoom),
+      );
+      onPlayerPositionChange(nextPosition);
+      setPlayerWalking(true);
+      if (playerWalkTimerRef.current != null) {
+        window.clearTimeout(playerWalkTimerRef.current);
+      }
+      playerWalkTimerRef.current = window.setTimeout(() => {
+        setPlayerWalking(false);
+        playerWalkTimerRef.current = null;
+      }, 360);
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [fixedStageSize, onOpenTasks, onPlayerPositionChange, playerActorId, playerPosition, zoom]);
 
   function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
     if (event.button !== 0) return;
@@ -1840,18 +2025,17 @@ function ArcadeOfficeStage({
             <StageRoom key={room.label} room={room} engineeringRows={engineeringRows} />
           ))}
 
-          <QuestMarker />
+          <QuestMarker active={playerNearQuest} />
 
-          {actors.map((actor) => {
-            const position =
-              actor.kind === "agent"
-                ? getAgentPositionInStage(agentSlot++, engineeringRows, engineeringRoom)
-                : MEMBER_POSITIONS[memberSlot++ % MEMBER_POSITIONS.length];
+          {renderedActors.map(({ actor, isPlayer, position, traveling }) => {
             return (
               <StageActor
                 key={actor.id}
                 actor={actor}
                 position={position}
+                isPlayer={isPlayer}
+                travel={actor.kind === "agent"}
+                walking={(isPlayer && playerWalking) || traveling}
                 selected={String(actor.id) === selectedActorId}
                 onSelect={onActorSelect}
                 onContextMenu={onActorContextMenu}
@@ -1936,8 +2120,7 @@ function StageRoom({
       </div>
       {room.variant === "engineering" && <EngineeringPlatforms rows={engineeringRows} />}
       {room.variant === "huddle" && <HuddleTable />}
-      {room.variant === "lounge" && <LoungeBench />}
-      {room.variant === "library" && <LibraryShelves />}
+      {room.variant === "rest" && <RestLounge />}
     </section>
   );
 }
@@ -1994,24 +2177,31 @@ function LoungeBench() {
   );
 }
 
-function LibraryShelves() {
+function RestLounge() {
   return (
-    <div className="absolute left-[7%] top-[23%] grid w-[78%] gap-4">
-      {[0, 1, 2].map((item) => (
-        <div
-          key={item}
-          className="h-3"
-          style={{
-            background: "rgba(255,216,74,0.42)",
-            boxShadow: `0 0 10px ${t4.xp}12`,
-          }}
-        />
-      ))}
-    </div>
+    <>
+      <LoungeBench />
+      <div
+        className="absolute left-[58%] top-[27%] h-[28%] w-[22%]"
+        style={{
+          border: `1px solid ${t4.ok}`,
+          background: `${t4.ok}10`,
+          boxShadow: `0 0 12px ${t4.ok}18`,
+        }}
+      />
+      <div
+        className="absolute left-[14%] top-[24%] h-[22%] w-[16%] rounded-[50%]"
+        style={{
+          border: `1px solid ${t4.ok}`,
+          background: `${t4.ok}12`,
+          boxShadow: `0 0 10px ${t4.ok}18`,
+        }}
+      />
+    </>
   );
 }
 
-function QuestMarker() {
+function QuestMarker({ active }: { active: boolean }) {
   return (
     <button
       type="button"
@@ -2023,6 +2213,8 @@ function QuestMarker() {
         boxShadow: `0 0 24px ${t4.xp}`,
         fontFamily: "var(--font-pixel)",
         fontSize: 12,
+        transform: active ? "translateY(-2px)" : undefined,
+        transition: "transform 140ms ease-out, box-shadow 140ms ease-out",
       }}
       aria-label="Quest"
     >
@@ -2039,6 +2231,25 @@ function QuestMarker() {
       >
         QUEST
       </span>
+      {active && (
+        <span
+          className="absolute left-1/2 top-[78px] min-w-[132px] -translate-x-1/2 px-2 py-1"
+          style={{
+            border: `1px solid ${t4.xp}`,
+            background: "rgba(9,11,22,0.94)",
+            color: t4.xp,
+            boxShadow: `0 0 14px ${t4.xp}50`,
+            fontFamily: "var(--font-mixed-ko)",
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: 0,
+            textShadow: `0 0 6px ${t4.xp}`,
+            lineHeight: 1.35,
+          }}
+        >
+          / 태스크 보드
+        </span>
+      )}
     </button>
   );
 }
@@ -2046,12 +2257,18 @@ function QuestMarker() {
 function StageActor({
   actor,
   position,
+  isPlayer = false,
+  travel,
+  walking,
   selected,
   onContextMenu,
   onSelect,
 }: {
   actor: OfficeActor;
   position: StageActorPosition;
+  isPlayer?: boolean;
+  travel?: boolean;
+  walking?: boolean;
   selected: boolean;
   onContextMenu: (payload: { actor: OfficeActor; x: number; y: number }) => void;
   onSelect: (actor: OfficeActor) => void;
@@ -2060,27 +2277,52 @@ function StageActor({
   const accent = isAgent ? t4.agent : t4.pink;
   const hasActiveTask = isAgent && Boolean(actor.activeTaskCount);
   const speech = getActorSpeechBubble(actor);
+  const visibleSpeech = isPlayer ? null : speech;
+  const playerIdle = isPlayer && !walking;
+  const avatarWalking = playerIdle ? false : walking;
+  const motion = walking ? "walking" : "idle";
   return (
     <button
       type="button"
-      className="absolute z-20 -translate-x-1/2 -translate-y-1/2 cursor-pointer border-0 bg-transparent p-0"
-      style={{ left: position.left, top: position.top }}
+      className={`stage-actor stage-actor--${motion} absolute z-20 -translate-x-1/2 -translate-y-1/2 cursor-pointer border-0 bg-transparent p-0`}
+      style={{
+        left: position.left,
+        top: position.top,
+        transition: travel
+          ? `left ${AGENT_TRAVEL_DURATION_MS}ms linear, top ${AGENT_TRAVEL_DURATION_MS}ms linear`
+          : "left 90ms linear, top 90ms linear",
+      }}
       onClick={() => onSelect(actor)}
       onContextMenu={(event) => {
         event.preventDefault();
         onContextMenu({ actor, x: event.clientX, y: event.clientY });
       }}
-      aria-label={`${actor.name} 채팅`}
+      aria-label={isPlayer ? `${actor.name} 플레이어` : `${actor.name} 채팅`}
     >
-      {speech && (
+      {isPlayer && (
+        <span
+          aria-hidden="true"
+          className="stage-actor__player-marker absolute left-1/2 -translate-x-1/2"
+          style={{
+            top: -50,
+            color: t4.pink,
+            fontFamily: "var(--font-pixel)",
+            fontSize: 11,
+            textShadow: `0 0 8px ${t4.pink}`,
+          }}
+        >
+          ▼
+        </span>
+      )}
+      {visibleSpeech && (
         <div
-          className="absolute left-1/2 max-w-[180px] -translate-x-1/2 px-4 py-1.5"
+          className="stage-actor__speech absolute left-1/2 max-w-[180px] -translate-x-1/2 px-4 py-1.5"
           title={actor.activeTaskTitle}
           style={{
             top: -68,
-            border: `1px solid ${speech.color}`,
+            border: `1px solid ${visibleSpeech.color}`,
             background: "rgba(9,11,22,0.94)",
-            boxShadow: `0 0 14px ${speech.color}55`,
+            boxShadow: `0 0 14px ${visibleSpeech.color}55`,
           }}
         >
           <span
@@ -2088,8 +2330,8 @@ function StageActor({
             className="absolute left-1/2 h-2 w-2 -translate-x-1/2 rotate-45"
             style={{
               bottom: -5,
-              borderRight: `1px solid ${speech.color}`,
-              borderBottom: `1px solid ${speech.color}`,
+              borderRight: `1px solid ${visibleSpeech.color}`,
+              borderBottom: `1px solid ${visibleSpeech.color}`,
               background: "rgba(9,11,22,0.94)",
             }}
           />
@@ -2099,48 +2341,51 @@ function StageActor({
               fontFamily: "var(--font-mixed-ko)",
               fontSize: 10,
               fontWeight: 700,
-              color: speech.color,
+              color: visibleSpeech.color,
               lineHeight: 1.35,
-              textShadow: `0 0 6px ${speech.color}`,
+              textShadow: `0 0 6px ${visibleSpeech.color}`,
             }}
           >
-            {speech.label && <span className="shrink-0">{speech.label}</span>}
-            {speech.text && <span className="min-w-0 truncate">{speech.text}</span>}
+            {visibleSpeech.label && <span className="shrink-0">{visibleSpeech.label}</span>}
+            {visibleSpeech.text && <span className="min-w-0 truncate">{visibleSpeech.text}</span>}
           </div>
         </div>
       )}
       <div
-        className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap px-2 py-1"
+        className={`absolute left-1/2 -translate-x-1/2 whitespace-nowrap ${isPlayer ? "px-1.5 py-0.5" : "px-2 py-1"}`}
         style={{
-          top: -30,
+          top: isPlayer ? -28 : -30,
           border: `1px solid ${accent}`,
-          background: "rgba(9,11,22,0.92)",
+          background: isPlayer ? "rgba(9,11,22,0.72)" : "rgba(9,11,22,0.92)",
           boxShadow: selected || hasActiveTask ? `0 0 14px ${accent}` : `0 0 10px ${accent}30`,
         }}
       >
         <div className="flex items-center justify-center gap-1.5">
+          {!isPlayer && (
+            <span
+              className={`h-1.5 w-1.5 shrink-0 ${hasActiveTask ? "animate-pulse" : ""}`}
+              style={{
+                background: hasActiveTask ? t4.ok : accent,
+                boxShadow: `0 0 6px ${accent}`,
+              }}
+            />
+          )}
           <span
-            className={`h-1.5 w-1.5 shrink-0 ${hasActiveTask ? "animate-pulse" : ""}`}
             style={{
-              background: hasActiveTask ? t4.ok : accent,
-              boxShadow: `0 0 6px ${accent}`,
-            }}
-          />
-          <span
-            style={{
-              fontFamily: "var(--font-mixed-ko)",
-              fontSize: 11,
-              fontWeight: 600,
-              letterSpacing: 0.2,
-              color: t4.ink,
+              fontFamily: isPlayer ? "var(--font-pixel)" : "var(--font-mixed-ko)",
+              fontSize: isPlayer ? 7 : 11,
+              fontWeight: isPlayer ? 400 : 600,
+              letterSpacing: isPlayer ? 1 : 0.2,
+              color: isPlayer ? t4.pink : t4.ink,
+              textShadow: isPlayer ? `0 0 6px ${t4.pink}` : undefined,
             }}
           >
-            {actor.name}
+            {isPlayer ? "YOU" : actor.name}
           </span>
         </div>
       </div>
       <div
-        className="relative"
+        className="stage-actor__avatar relative"
         style={{
           padding: 4,
           filter:
@@ -2149,7 +2394,7 @@ function StageActor({
               : `drop-shadow(0 0 8px ${accent}80)`,
         }}
       >
-        <PixelAvatar kind={pickAvatarKind(actor.name, isAgent)} size={3} walking={actor.status === "working"} />
+        <PixelAvatar kind={pickAvatarKind(actor.name, isAgent)} size={3} walking={avatarWalking} />
       </div>
     </button>
   );
@@ -2298,6 +2543,15 @@ function ActorChatSidePanel({
     if (!open || activeTab !== "chat") return;
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [open, activeTab, messages.length, lastMessageId, sending]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open, onClose]);
 
   if (!open || !target) return null;
   const isAgent = target?.kind === "agent";
@@ -2899,21 +3153,14 @@ function TaskDetailModal({
             aria-label="태스크 상세 닫기"
             className="absolute right-5 top-4 z-10"
             style={{
-              width: 24,
-              height: 24,
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: t4.dim,
+              color: "var(--t4-dim)",
               background: "transparent",
               border: "none",
               cursor: "pointer",
-              fontFamily: "var(--font-mono-arcade)",
-              fontSize: 18,
-              lineHeight: 1,
+              padding: 4,
             }}
           >
-            ×
+            <X className="w-5 h-5" />
           </button>
 
           <section className="min-h-0 min-w-0 overflow-y-auto px-7 py-9 sm:px-10 lg:px-12">
@@ -3760,6 +4007,20 @@ function Skyline() {
 const STAGE_ZOOM_MIN = 0.75;
 const STAGE_ZOOM_MAX = 1.5;
 const STAGE_ZOOM_STEP = 0.125;
+const PLAYER_MOVE_STEP_PX = 18;
+const PLAYER_MOVE_FAST_STEP_PX = 30;
+const PLAYER_STAGE_BOUNDS = {
+  minX: 4,
+  maxX: 96,
+  minY: 10,
+  maxY: 90,
+};
+const AGENT_TRAVEL_DURATION_MS = 1900;
+const PRESENCE_POSITION_THROTTLE_MS = 100;
+const QUEST_MARKER_POSITION: StageActorPosition = { left: "61.5%", top: "13.5%" };
+const QUEST_INTERACTION_RADIUS_PCT = 6.5;
+const ACTOR_INTERACTION_RADIUS_PCT = 7;
+
 function clampStageZoom(value: number) {
   return Math.min(STAGE_ZOOM_MAX, Math.max(STAGE_ZOOM_MIN, Number(value.toFixed(3))));
 }
@@ -3770,6 +4031,291 @@ function clampMiniMapValue(value: number, min: number, max: number) {
 
 function pct(value: number) {
   return `${Number(value.toFixed(2))}%`;
+}
+
+function parseStagePct(value: string) {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 50;
+}
+
+function moveStagePosition(
+  position: StageActorPosition,
+  deltaX: number,
+  deltaY: number,
+): StageActorPosition {
+  return {
+    left: pct(
+      clampMiniMapValue(parseStagePct(position.left) + deltaX, PLAYER_STAGE_BOUNDS.minX, PLAYER_STAGE_BOUNDS.maxX),
+    ),
+    top: pct(
+      clampMiniMapValue(parseStagePct(position.top) + deltaY, PLAYER_STAGE_BOUNDS.minY, PLAYER_STAGE_BOUNDS.maxY),
+    ),
+  };
+}
+
+function getStageDistancePct(a: StageActorPosition, b: StageActorPosition) {
+  const dx = parseStagePct(a.left) - parseStagePct(b.left);
+  const dy = parseStagePct(a.top) - parseStagePct(b.top);
+  return Math.hypot(dx, dy);
+}
+
+function sameStagePosition(a: StageActorPosition, b: StageActorPosition) {
+  return a.left === b.left && a.top === b.top;
+}
+
+function isNearQuestMarker(position: StageActorPosition) {
+  return getStageDistancePct(position, QUEST_MARKER_POSITION) <= QUEST_INTERACTION_RADIUS_PCT;
+}
+
+function findNearestInteractableActor(
+  playerPos: StageActorPosition,
+  candidates: Array<{ actor: OfficeActor; position: StageActorPosition }>,
+): OfficeActor | null {
+  let best: { actor: OfficeActor; distance: number } | null = null;
+  for (const candidate of candidates) {
+    const distance = getStageDistancePct(playerPos, candidate.position);
+    if (distance > ACTOR_INTERACTION_RADIUS_PCT) continue;
+    if (!best || distance < best.distance) {
+      best = { actor: candidate.actor, distance };
+    }
+  }
+  return best?.actor ?? null;
+}
+
+function getPlayerMoveDirection(key: string): { x: number; y: number } | null {
+  switch (key.toLowerCase()) {
+    case "arrowup":
+    case "w":
+      return { x: 0, y: -1 };
+    case "arrowdown":
+    case "s":
+      return { x: 0, y: 1 };
+    case "arrowleft":
+    case "a":
+      return { x: -1, y: 0 };
+    case "arrowright":
+    case "d":
+      return { x: 1, y: 0 };
+    default:
+      return null;
+  }
+}
+
+function shouldIgnoreStageMovementKey(target: EventTarget | null) {
+  if (document.querySelector('[role="dialog"]')) return true;
+  if (!(target instanceof HTMLElement)) return false;
+  const tagName = target.tagName.toLowerCase();
+  return (
+    target.isContentEditable ||
+    tagName === "input" ||
+    tagName === "textarea" ||
+    tagName === "select"
+  );
+}
+
+function buildWorkspacePresenceUrl(workspaceId: number, token: string) {
+  if (typeof window === "undefined") return null;
+  try {
+    const baseUrl = API_BASE ? new URL(API_BASE, window.location.origin).origin : window.location.origin;
+    const url = new URL(`/ws/workspaces/${workspaceId}/presence`, baseUrl);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    url.searchParams.set("token", token);
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function parsePresenceMessage(raw: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(raw);
+    return isPresenceRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizePresenceSnapshotMember(value: unknown): PresenceSnapshotMember | null {
+  if (!isPresenceRecord(value)) return null;
+  const memberId = normalizePresenceMemberId(value.memberId);
+  if (memberId == null) return null;
+  return {
+    memberId,
+    position: isPresencePosition(value.position) ? value.position : null,
+  };
+}
+
+function normalizePresenceMemberId(value: unknown) {
+  const memberId = Number(value);
+  return Number.isFinite(memberId) ? memberId : null;
+}
+
+function isPresencePosition(value: unknown): value is StageActorPosition {
+  return (
+    isPresenceRecord(value) &&
+    typeof value.left === "string" &&
+    typeof value.top === "string" &&
+    Number.isFinite(Number.parseFloat(value.left)) &&
+    Number.isFinite(Number.parseFloat(value.top))
+  );
+}
+
+function isPresenceRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isPresent<T>(value: T | null | undefined): value is T {
+  return value != null;
+}
+
+function useWorkspacePresence(
+  workspaceId: number,
+  memberId: number | undefined,
+): WorkspacePresenceState {
+  const socketRef = useRef<WebSocket | null>(null);
+  const pendingPositionRef = useRef<{ position: StageActorPosition; status: PresenceStatus } | null>(null);
+  const lastPositionSentAtRef = useRef(0);
+  const positionTimerRef = useRef<number | null>(null);
+  const [onlineMemberIds, setOnlineMemberIds] = useState<Set<number> | null>(null);
+  const [remoteMemberPositions, setRemoteMemberPositions] = useState<Record<number, StageActorPosition>>({});
+
+  const flushPosition = useCallback(() => {
+    const pending = pendingPositionRef.current;
+    const socket = socketRef.current;
+    if (!pending || socket?.readyState !== WebSocket.OPEN) return;
+    socket.send(
+      JSON.stringify({
+        type: "presence.position",
+        position: pending.position,
+        status: pending.status,
+      }),
+    );
+    pendingPositionRef.current = null;
+    lastPositionSentAtRef.current = Date.now();
+  }, []);
+
+  const sendPosition = useCallback(
+    (position: StageActorPosition, status: PresenceStatus = "walking") => {
+      pendingPositionRef.current = { position, status };
+      const elapsed = Date.now() - lastPositionSentAtRef.current;
+      if (elapsed >= PRESENCE_POSITION_THROTTLE_MS) {
+        if (positionTimerRef.current != null) {
+          window.clearTimeout(positionTimerRef.current);
+          positionTimerRef.current = null;
+        }
+        flushPosition();
+        return;
+      }
+      if (positionTimerRef.current != null) return;
+      positionTimerRef.current = window.setTimeout(() => {
+        positionTimerRef.current = null;
+        flushPosition();
+      }, PRESENCE_POSITION_THROTTLE_MS - elapsed);
+    },
+    [flushPosition],
+  );
+
+  useEffect(() => {
+    const token = getAccessToken();
+    const url = token ? buildWorkspacePresenceUrl(workspaceId, token) : null;
+    if (!memberId || !url) {
+      queueMicrotask(() => {
+        setOnlineMemberIds(null);
+        setRemoteMemberPositions({});
+      });
+      return;
+    }
+
+    let closedByEffect = false;
+    const socket = new WebSocket(url);
+    socketRef.current = socket;
+
+    socket.onmessage = (event) => {
+      const message = parsePresenceMessage(event.data);
+      if (!message) return;
+
+      if (message.type === "presence.snapshot") {
+        const members = Array.isArray(message.members)
+          ? message.members.map(normalizePresenceSnapshotMember).filter(isPresent)
+          : [];
+        const nextOnlineMemberIds = new Set(members.map((member) => member.memberId));
+        nextOnlineMemberIds.add(memberId);
+        setOnlineMemberIds(nextOnlineMemberIds);
+        setRemoteMemberPositions(
+          Object.fromEntries(
+            members
+              .filter((member) => member.position)
+              .map((member) => [member.memberId, member.position as StageActorPosition]),
+          ),
+        );
+        return;
+      }
+
+      const messageMemberId = normalizePresenceMemberId(message.memberId);
+      if (message.type === "presence.join" && messageMemberId != null) {
+        setOnlineMemberIds((prev) => {
+          const next = new Set(prev ?? []);
+          next.add(messageMemberId);
+          next.add(memberId);
+          return next;
+        });
+        return;
+      }
+
+      if (message.type === "presence.leave" && messageMemberId != null) {
+        setOnlineMemberIds((prev) => {
+          if (!prev) return prev;
+          const next = new Set(prev);
+          next.delete(messageMemberId);
+          next.add(memberId);
+          return next;
+        });
+        setRemoteMemberPositions((prev) => {
+          if (!(messageMemberId in prev)) return prev;
+          const next = { ...prev };
+          delete next[messageMemberId];
+          return next;
+        });
+        return;
+      }
+
+      if (
+        message.type === "presence.position" &&
+        messageMemberId != null &&
+        isPresencePosition(message.position)
+      ) {
+        const nextPosition = message.position;
+        setRemoteMemberPositions((prev) => ({
+          ...prev,
+          [messageMemberId]: nextPosition,
+        }));
+      }
+    };
+
+    socket.onclose = () => {
+      if (socketRef.current === socket) socketRef.current = null;
+      if (!closedByEffect) {
+        setOnlineMemberIds(null);
+        setRemoteMemberPositions({});
+      }
+    };
+
+    return () => {
+      closedByEffect = true;
+      if (socketRef.current === socket) socketRef.current = null;
+      socket.close();
+    };
+  }, [memberId, workspaceId]);
+
+  useEffect(() => {
+    return () => {
+      if (positionTimerRef.current != null) {
+        window.clearTimeout(positionTimerRef.current);
+      }
+    };
+  }, []);
+
+  return { onlineMemberIds, remoteMemberPositions, sendPosition };
 }
 
 const AGENT_DESK_COL_CENTERS = [16, 33, 50, 67];
@@ -3823,22 +4369,13 @@ function getStageRooms(engineeringRows: number): StageRoomSpec[] {
       variant: "huddle",
     },
     {
-      label: "♦ LOUNGE",
-      left: pct(5.5),
-      top: pct(Math.max(50, ENGINEERING_TOP_PCT + engineeringHeight + 4)),
-      width: pct(19.3),
-      height: pct(21.5),
-      color: t4.ok,
-      variant: "lounge",
-    },
-    {
-      label: "♦ LIBRARY · QUIET ZONE",
+      label: "♦ LOUNGE · REST ZONE",
       left: pct(27),
       top: pct(Math.max(38, ENGINEERING_TOP_PCT + engineeringHeight + 2)),
       width: pct(32.8),
       height: pct(33.6),
-      color: t4.xp,
-      variant: "library",
+      color: t4.ok,
+      variant: "rest",
     },
   ];
 }
@@ -3866,6 +4403,20 @@ function getAgentPositionInStage(
   };
 }
 
+function getAgentLoungePosition(agentIdx: number, room: StageRoomSpec): StageActorPosition {
+  const slot = AGENT_LOUNGE_POSITIONS[agentIdx % AGENT_LOUNGE_POSITIONS.length];
+  const round = Math.floor(agentIdx / AGENT_LOUNGE_POSITIONS.length);
+  const roomLeft = parseFloat(room.left);
+  const roomTop = parseFloat(room.top);
+  const roomW = parseFloat(room.width);
+  const roomH = parseFloat(room.height);
+  const offset = (round % 2) * 4;
+  return {
+    left: pct(roomLeft + ((slot.x + offset) / 100) * roomW),
+    top: pct(roomTop + ((slot.y + offset) / 100) * roomH),
+  };
+}
+
 function getStageMiniMapRooms(rooms: StageRoomSpec[]): MiniMapRoom[] {
   return rooms.map((room) => ({
     color: room.color,
@@ -3887,6 +4438,15 @@ const MEMBER_POSITIONS: StageActorPosition[] = [
   { left: "44.0%", top: "62.5%" },
   { left: "60.5%", top: "27%" },
   { left: "16.8%", top: "70%" },
+];
+
+const AGENT_LOUNGE_POSITIONS = [
+  { x: 20, y: 70 },
+  { x: 42, y: 58 },
+  { x: 64, y: 68 },
+  { x: 76, y: 42 },
+  { x: 30, y: 36 },
+  { x: 52, y: 80 },
 ];
 
 function SettingsSelectModal({
@@ -4057,6 +4617,10 @@ function TaskDashboardModal({
       cancelled = true;
     };
   }, [open, workspaceId]);
+
+  useEffect(() => {
+    if (!open) setSelectedTask(null);
+  }, [open]);
 
   return (
     <Modal open={open} onClose={onClose} title="DASHBOARD 워크스페이스 현황" size="full">
@@ -4786,18 +5350,11 @@ function SlackIntegrationModal({
   onClose,
   onBack,
   isAdmin,
-  slackTeamId,
-  onSlackTeamIdChange,
-  slackChannelId,
-  onSlackChannelIdChange,
-  botToken,
-  onBotTokenChange,
   saved,
   error,
   notice,
   submitting,
   deleting,
-  onSubmit,
   onInstall,
   onDelete,
 }: {
@@ -4805,143 +5362,99 @@ function SlackIntegrationModal({
   onClose: () => void;
   onBack: () => void;
   isAdmin: boolean;
-  slackTeamId: string;
-  onSlackTeamIdChange: (value: string) => void;
-  slackChannelId: string;
-  onSlackChannelIdChange: (value: string) => void;
-  botToken: string;
-  onBotTokenChange: (value: string) => void;
   saved: SlackIntegration | null;
   error: string;
   notice: string;
   submitting: boolean;
   deleting: boolean;
-  onSubmit: (e: FormEvent) => void;
   onInstall: () => void;
   onDelete: () => void;
 }) {
   return (
     <Modal open={open} onClose={onClose} title="Slack 연동" size="md">
-      <form onSubmit={onSubmit}>
-        <Modal.Body className="grid gap-5 md:grid-cols-[minmax(0,1fr)_260px]">
-          <div className="flex flex-col gap-4">
-            <div className="rounded-lg border border-[var(--neon-border-muted)] bg-surface p-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary-muted text-primary">
-                <Bell />
-              </div>
-              <h3 className="mt-4 text-title text-text">Slack OAuth 연결</h3>
-              <p className="mt-2 text-body text-text-muted">
-                Slack 승인 화면으로 이동해 워크스페이스와 채널 권한을 승인합니다.
-              </p>
-              <Button
-                type="button"
-                className="mt-4"
-                icon={<Bell />}
-                loading={submitting}
-                disabled={!isAdmin || deleting}
-                onClick={onInstall}
-              >
-                {saved ? "Slack 다시 연동하기" : "Slack 연동하기"}
-              </Button>
-            </div>
-            <div className="rounded-lg border border-[var(--neon-border-muted)] bg-surface p-4">
-              <h3 className="text-title text-text">수동 등록</h3>
-              <p className="mt-1 text-caption text-text-muted">
-                OAuth를 사용할 수 없는 경우 Swagger 수동 등록 API로 Team, Channel, Bot Token을 저장합니다.
-              </p>
-              <div className="mt-4 grid gap-3">
-                <Field label="Slack Team ID">
-                  <Input
-                    value={slackTeamId}
-                    onChange={(e) => onSlackTeamIdChange(e.target.value)}
-                    placeholder="T0123456789"
-                    disabled={!isAdmin || submitting}
-                  />
-                </Field>
-                <Field label="Slack Channel ID">
-                  <Input
-                    value={slackChannelId}
-                    onChange={(e) => onSlackChannelIdChange(e.target.value)}
-                    placeholder="C0123456789"
-                    disabled={!isAdmin || submitting}
-                  />
-                </Field>
-                <Field label="Bot Token">
-                  <Input
-                    type="password"
-                    value={botToken}
-                    onChange={(e) => onBotTokenChange(e.target.value)}
-                    placeholder={saved ? "변경할 때만 입력" : "xoxb-..."}
-                    disabled={!isAdmin || submitting}
-                  />
-                </Field>
-              </div>
-            </div>
-            {!isAdmin && (
-              <p className="text-caption text-danger">
-                Slack 연동은 워크스페이스 ADMIN만 설정할 수 있습니다.
-              </p>
-            )}
-            {error && <p className="text-caption text-danger">{error}</p>}
-            {notice && <p className="text-caption text-success">{notice}</p>}
-          </div>
-
-          <div className="relative min-h-[260px] rounded-lg border border-border bg-surface-raised/70 p-4 pb-12">
+      <Modal.Body className="grid gap-5 md:grid-cols-[minmax(0,1fr)_260px]">
+        <div className="flex flex-col gap-4">
+          <div className="rounded-lg border border-[var(--neon-border-muted)] bg-surface p-4">
             <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary-muted text-primary">
-              {saved ? <CheckCircle2 /> : <KeyRound />}
+              <Bell />
             </div>
-            <h3 className="mt-4 text-title text-text">저장 상태</h3>
-            <p className="mt-1 text-caption text-text-muted">
-              저장된 Slack 연동 정보가 자동으로 표시됩니다.
+            <h3 className="mt-4 text-title text-text">Slack OAuth 연결</h3>
+            <p className="mt-2 text-body text-text-muted">
+              Slack 승인 화면으로 이동해 워크스페이스와 채널 권한을 승인합니다.
             </p>
-            {saved ? (
-              <div className="mt-4 grid gap-2 text-caption">
-                <Info label="ID" value={String(saved.id)} />
-                <Info label="Team" value={saved.slackTeamId} />
-                <Info label="Channel" value={saved.slackChannelId} />
-                <Info label="Token" value={saved.maskedBotToken} />
-              </div>
-            ) : (
-              <p className="mt-4 text-caption text-text-muted">
-                저장된 Slack 연동 정보가 없습니다.
-              </p>
-            )}
-            {saved && (
-              <div className="absolute bottom-3 right-3 flex items-center gap-2">
-                <button
-                  type="submit"
-                  disabled={!isAdmin || deleting || submitting}
-                  className="text-caption text-text-muted hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {submitting ? "저장 중" : "수정"}
-                </button>
-                <span className="text-caption text-text-dim">·</span>
-                <button
-                  type="button"
-                  onClick={onDelete}
-                  disabled={!isAdmin || submitting || deleting}
-                  className="text-caption text-text-muted hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {deleting ? "삭제 중" : "삭제"}
-                </button>
-              </div>
-            )}
-          </div>
-        </Modal.Body>
-        <Modal.Footer>
-          <Button type="button" variant="ghost" icon={<ArrowLeft />} onClick={onBack} disabled={submitting}>
-            채널 설정
-          </Button>
-          <Button type="button" variant="ghost" onClick={onClose} disabled={submitting}>
-            닫기
-          </Button>
-          {!saved && (
-            <Button type="submit" icon={<KeyRound />} loading={submitting} disabled={!isAdmin || deleting}>
-              수동 등록
+            <Button
+              type="button"
+              className="mt-4"
+              variant="secondary"
+              icon={<Bell />}
+              loading={submitting}
+              disabled={!isAdmin || deleting}
+              onClick={onInstall}
+              style={{
+                fontFamily: "var(--font-mixed-ko)",
+                textTransform: "none",
+                letterSpacing: "normal",
+                fontSize: 12,
+                fontWeight: 600,
+                borderColor: t4.ok,
+                color: t4.ok,
+                boxShadow: "none",
+              }}
+            >
+              {saved ? "Slack 다시 연동하기" : "Slack 연동하기"}
             </Button>
+          </div>
+          {!isAdmin && (
+            <p className="text-caption text-danger">
+              Slack 연동은 워크스페이스 ADMIN만 설정할 수 있습니다.
+            </p>
           )}
-        </Modal.Footer>
-      </form>
+          {error && <p className="text-caption text-danger">{error}</p>}
+          {notice && <p className="text-caption text-success">{notice}</p>}
+        </div>
+
+        <div className="relative min-h-[260px] rounded-lg border border-border bg-surface-raised/70 p-4 pb-12">
+          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary-muted text-primary">
+            {saved ? <CheckCircle2 /> : <KeyRound />}
+          </div>
+          <h3 className="mt-4 text-title text-text">저장 상태</h3>
+          <p className="mt-1 text-caption text-text-muted">
+            저장된 Slack 연동 정보가 자동으로 표시됩니다.
+          </p>
+          {saved ? (
+            <div className="mt-4 grid gap-2 text-caption">
+              <Info label="ID" value={String(saved.id)} />
+              <Info label="Team" value={saved.slackTeamId} />
+              <Info label="Channel" value={saved.slackChannelId} />
+              <Info label="Token" value={saved.maskedBotToken} />
+            </div>
+          ) : (
+            <p className="mt-4 text-caption text-text-muted">
+              저장된 Slack 연동 정보가 없습니다.
+            </p>
+          )}
+          {saved && (
+            <div className="absolute bottom-3 right-3 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onDelete}
+                disabled={!isAdmin || submitting || deleting}
+                className="text-caption text-text-muted hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {deleting ? "삭제 중" : "삭제"}
+              </button>
+            </div>
+          )}
+        </div>
+      </Modal.Body>
+      <Modal.Footer>
+        <Button type="button" variant="ghost" icon={<ArrowLeft />} onClick={onBack} disabled={submitting}>
+          채널 설정
+        </Button>
+        <Button type="button" variant="ghost" onClick={onClose} disabled={submitting}>
+          닫기
+        </Button>
+      </Modal.Footer>
     </Modal>
   );
 }
@@ -5877,6 +6390,13 @@ function agentIdFromActor(actor: OfficeActor) {
   const raw = String(actor.id).replace(/^agent:/, "");
   const agentId = Number(raw);
   return Number.isFinite(agentId) ? agentId : null;
+}
+
+function memberIdFromActor(actor: OfficeActor) {
+  if (actor.kind !== "member") return null;
+  const raw = String(actor.id).replace(/^member:/, "");
+  const memberId = Number(raw);
+  return Number.isFinite(memberId) ? memberId : null;
 }
 
 function mergeServerChatMessages(
