@@ -68,6 +68,12 @@ export function deleteWorkspace(workspaceId: number) {
   });
 }
 
+export function leaveWorkspace(workspaceId: number) {
+  return apiFetch<void>(`/api/v1/workspaces/${workspaceId}/members/me`, {
+    method: "DELETE",
+  });
+}
+
 export function listWorkspaceMembers(workspaceId: number) {
   return apiFetch<WorkspaceMember[]>(`/api/v1/workspaces/${workspaceId}/members`);
 }
