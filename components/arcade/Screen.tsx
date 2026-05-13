@@ -90,7 +90,7 @@ export default function T4Screen({
             <GlyphText glyph="◆">AI OFFICE</GlyphText>
           </span>
           <span style={{ textTransform: "uppercase" }}>{title}</span>
-          <span style={{ marginLeft: "auto" }}>FPS 60 · PING 12ms · {clock}</span>
+          <span style={{ marginLeft: "auto" }}>{clock}</span>
         </div>
         <div
           style={{

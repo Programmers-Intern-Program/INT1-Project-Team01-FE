@@ -24,6 +24,8 @@ type Palette = {
   mouth: string;
 };
 
+export type PixelAvatarPaletteOverride = Partial<Palette>;
+
 export const PA_PALETTES: Record<PixelAvatarKind, Palette> = {
   alex:  { skin:"#f4c89a", skin2:"#c89968", hair:"#3a2a1a", hair2:"#1f1410", shirt:"#2a3a4a", shirt2:"#15202c", pants:"#1a1a1a", shoe:"#0a0a0a", eye:"#0a0a0a", mouth:"#7a4a3a" },
   mira:  { skin:"#e8b894", skin2:"#b88860", hair:"#a83a3a", hair2:"#6a1f1f", shirt:"#d8c89a", shirt2:"#a89868", pants:"#3a2a4a", shoe:"#1a1a1a", eye:"#0a0a0a", mouth:"#8a3a3a" },
@@ -198,6 +200,7 @@ interface PixelAvatarProps {
   direction?: PixelAvatarDirection;
   size?: number;
   walking?: boolean;
+  paletteOverride?: PixelAvatarPaletteOverride;
   style?: CSSProperties;
   className?: string;
 }
@@ -207,10 +210,15 @@ export default function PixelAvatar({
   direction = "S",
   size = 4,
   walking = false,
+  paletteOverride,
   style,
   className,
 }: PixelAvatarProps) {
-  const pal = PA_PALETTES[kind] || PA_PALETTES.alex;
+  const basePal = PA_PALETTES[kind] || PA_PALETTES.alex;
+  const pal = useMemo(
+    () => ({ ...basePal, ...paletteOverride }),
+    [basePal, paletteOverride],
+  );
   const frame = walking
     ? HERO_WALK_FRAMES[direction] || HERO_WALK_FRAMES.S
     : HERO_FRAMES[direction] || HERO_FRAMES.S;
