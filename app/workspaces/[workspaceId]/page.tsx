@@ -23,14 +23,23 @@ import {
   X,
 } from "lucide-react";
 import { Button, Input, Modal } from "@/components/ui";
-import { GlyphText, T4Panel, PixelAvatar, type PixelAvatarKind } from "@/components/arcade";
+import {
+  GlyphText,
+  T4Panel,
+  PixelAvatar,
+  PA_PALETTES,
+  type PixelAvatarKind,
+  type PixelAvatarPaletteOverride,
+  type PixelAvatarDirection,
+} from "@/components/arcade";
 import { t4 } from "@/components/arcade/tokens";
 import {
   WorkspaceErrorState,
   WorkspaceLoadingState,
 } from "@/components/workspace/WorkspaceShell";
 import type { OfficeAgentState } from "@/game/office/EventBus";
-import { API_BASE, getAccessToken, getStoredUser, type ApiError } from "@/lib/api-client";
+import { API_BASE, apiFetch, getAccessToken, getStoredUser, type ApiError } from "@/lib/api-client";
+import type { MemberProfile } from "@/lib/api/members";
 import {
   deleteSlackIntegration,
   getSlackInstallUrl,
@@ -89,8 +98,10 @@ import {
 } from "@/lib/api/tasks";
 import {
   getWorkspace,
+  listWorkspaceMemberTaskStats,
   listWorkspaceMembers,
   type WorkspaceDetail,
+  type WorkspaceMemberTaskStats,
   type WorkspaceMember,
 } from "@/lib/api/workspaces";
 
@@ -103,6 +114,7 @@ type OfficeActor = OfficeAgentState & {
   activeTaskCount?: number;
   activeTaskTitle?: string;
   activeTaskStatus?: TaskStatus;
+  avatarProfile?: StoredCharacterProfile;
 };
 
 type AgentRole = "ORCHESTRATOR" | "BACKEND" | "FRONTEND" | "QA" | "CUSTOM";
@@ -210,6 +222,13 @@ interface DashboardLogItem {
   message: string;
   createdAt?: string;
 }
+
+interface StoredCharacterProfile {
+  kind: PixelAvatarKind;
+  paletteOverride?: PixelAvatarPaletteOverride;
+}
+
+const CHARACTER_STORAGE_KEY = "ai-office.character";
 
 const STATUS_META: Record<
   OfficeActor["status"],
@@ -355,7 +374,6 @@ export default function WorkspaceOfficePage({
   const [selectedActorId, setSelectedActorId] = useState<string | null>(null);
   const [stageZoom, setStageZoom] = useState(1);
   const [stagePan, setStagePan] = useState<StagePan>({ x: 0, y: 0 });
-  const [stageSize, setStageSize] = useState<StageSize>({ width: 1, height: 1 });
   const [playerPositionOverride, setPlayerPositionOverride] = useState<{
     workspaceId: number;
     actorId: string;
@@ -374,12 +392,17 @@ export default function WorkspaceOfficePage({
   const [artifactView, setArtifactView] = useState<{ path: string; name?: string } | null>(null);
   const [filesOpen, setFilesOpen] = useState(false);
   const [tasks, setTasks] = useState<WorkspaceTask[]>([]);
+  const [memberTaskStats, setMemberTaskStats] = useState<WorkspaceMemberTaskStats[]>([]);
   const [tasksError, setTasksError] = useState("");
 
   const refreshTasks = useCallback(async () => {
     try {
-      const nextTasks = await listWorkspaceTasks(id);
+      const [nextTasks, nextMemberTaskStats] = await Promise.all([
+        listWorkspaceTasks(id),
+        listWorkspaceMemberTaskStats(id).catch(() => null),
+      ]);
       setTasks(nextTasks);
+      if (nextMemberTaskStats) setMemberTaskStats(nextMemberTaskStats);
       setTasksError("");
     } catch (err) {
       const apiErr = err as ApiError;
@@ -410,11 +433,12 @@ export default function WorkspaceOfficePage({
     (async () => {
       if (!getStoredUser()) return;
       try {
-        const [workspace, members, initialTasks, initialAgents] = await Promise.all([
+        const [workspace, members, initialTasks, initialAgents, initialMemberTaskStats] = await Promise.all([
           getWorkspace(id),
           listWorkspaceMembers(id),
           listWorkspaceTasks(id).catch(() => []),
           listAgents(id).catch(() => readHiredAgents(id)),
+          listWorkspaceMemberTaskStats(id).catch(() => []),
         ]);
         if (!cancelled) {
           const nextAgents = initialAgents.map(toHiredAgent);
@@ -422,6 +446,7 @@ export default function WorkspaceOfficePage({
           writeHiredAgents(id, nextAgents);
           setChatSessionIds(readChatSessionIds(id));
           setTasks(initialTasks);
+          setMemberTaskStats(initialMemberTaskStats);
           setState({ kind: "ready", workspace, members });
         }
       } catch (err) {
@@ -460,12 +485,14 @@ export default function WorkspaceOfficePage({
       if (inFlight) return;
       inFlight = true;
       try {
-        const [nextTasks, nextAgents] = await Promise.all([
+        const [nextTasks, nextAgents, nextMemberTaskStats] = await Promise.all([
           listWorkspaceTasks(id),
           listAgents(id).catch(() => null),
+          listWorkspaceMemberTaskStats(id).catch(() => null),
         ]);
         if (!cancelled) {
           setTasks(nextTasks);
+          if (nextMemberTaskStats) setMemberTaskStats(nextMemberTaskStats);
           if (nextAgents) {
             const mappedAgents = nextAgents.map(toHiredAgent);
             setHiredAgents(mappedAgents);
@@ -672,6 +699,7 @@ export default function WorkspaceOfficePage({
   }, [id, openClawOpen]);
 
   const storedUser = getStoredUser();
+  const storedCharacter = loadStoredCharacterProfile();
   const storedMemberId = storedUser?.memberId;
   const playerActorId = storedMemberId != null ? `member:${storedMemberId}` : null;
   const {
@@ -698,8 +726,6 @@ export default function WorkspaceOfficePage({
     [id, playerActorId, sendPresencePosition],
   );
 
-  const chatTargetAgentId =
-    chatTarget && chatTarget.kind === "agent" ? agentIdFromActor(chatTarget) : null;
   const actors = useMemo(() => {
     if (state.kind !== "ready") return [];
     const agentActors = hiredAgents
@@ -722,20 +748,10 @@ export default function WorkspaceOfficePage({
               status: orchestrationRun?.status,
             })
             : null;
-        const isProcessingChat =
-          chatSending && chatTargetAgentId != null && chatTargetAgentId === agentId;
-        const processingState = isProcessingChat
-          ? {
-              count: 1,
-              title:
-                agent.role === "ORCHESTRATOR" ? "PLAN 작성 중..." : "응답 생성 중...",
-              status: "IN_PROGRESS" as TaskStatus,
-            }
-          : null;
         const taskState =
           agent.role === "ORCHESTRATOR"
-            ? processingState ?? orchestratorState ?? ownTaskState
-            : processingState ?? ownTaskState;
+            ? orchestratorState ?? ownTaskState
+            : ownTaskState;
         return {
           id: `agent:${agent.id}`,
           name: agent.name,
@@ -755,19 +771,18 @@ export default function WorkspaceOfficePage({
       : state.members;
     const memberActors = visibleMembers.map<OfficeActor>((member, index) => ({
       id: `member:${member.memberId}`,
-      name: member.name,
+      name: member.profile?.displayName || member.name,
       role: member.role,
       status: pickStatus(index, member.role),
       desk: agentActors.length + index,
       kind: "member",
+      avatarProfile: memberProfileToStoredCharacter(member.profile),
     }));
     return [...agentActors, ...memberActors];
   }, [
     hiredAgents,
     state,
     tasks,
-    chatSending,
-    chatTargetAgentId,
     chatSessionIds,
     orchestrationRuns,
     onlineMemberIds,
@@ -780,18 +795,25 @@ export default function WorkspaceOfficePage({
   );
   const agentCount = actors.filter((actor) => actor.kind === "agent").length;
   const engineeringRows = getEngineeringRows(agentCount);
-  const stageRooms = useMemo(
-    () => getStageRooms(engineeringRows),
+  const stageWorldSize = useMemo(
+    () => getStageWorldSize(engineeringRows),
     [engineeringRows],
+  );
+  const stageRooms = useMemo(
+    () => getStageRooms(engineeringRows, stageWorldSize, agentCount),
+    [agentCount, engineeringRows, stageWorldSize],
   );
 
   if (state.kind === "loading") return <WorkspaceLoadingState />;
   if (state.kind === "error") return <WorkspaceErrorState message={state.message} />;
 
-  const workingCount = actors.filter((actor) => actor.status === "working").length;
   const adminCount = state.members.filter((member) => member.role === "ADMIN").length;
   const isAdmin = state.workspace.myRole === "ADMIN";
   const myMiniMapPosition = playerPosition ?? defaultPlayerPosition;
+  const myWorkspaceMember = state.members.find((member) => member.memberId === storedMemberId);
+  const myAvatarProfile = memberProfileToStoredCharacter(myWorkspaceMember?.profile) ?? storedCharacter;
+  const myMemberTaskStats = memberTaskStats.find((stats) => stats.memberId === storedMemberId);
+  const heroStats = buildHeroHudStats(tasks, actors, myMemberTaskStats);
 
   function handleWorkspaceLeavePlaceholder() {
     setWorkspaceLeaveNotice("워크스페이스 나가기 API가 준비되면 연결됩니다.");
@@ -1219,9 +1241,11 @@ export default function WorkspaceOfficePage({
         <ArcadeOfficeStage
           actors={actors}
           rooms={stageRooms}
+          worldSize={stageWorldSize}
           engineeringRows={engineeringRows}
           selectedActorId={selectedActorId}
           playerActorId={playerActorId}
+          playerAvatar={myAvatarProfile}
           playerPosition={playerPosition}
           remoteMemberPositions={remoteMemberPositions}
           zoom={stageZoom}
@@ -1230,7 +1254,6 @@ export default function WorkspaceOfficePage({
           onPlayerPositionChange={handlePlayerPositionChange}
           onOpenTasks={() => setTasksOpen(true)}
           onOpenChatWithActor={(actor) => openActorChat(actor, "chat")}
-          onSizeChange={setStageSize}
           onActorSelect={(actor) => {
             setSelectedActorId(String(actor.id));
             setActorMenu(null);
@@ -1239,9 +1262,9 @@ export default function WorkspaceOfficePage({
         />
 
         <HeroHud
-          name={storedUser?.name ?? "HERO"}
-          memberCount={state.members.length}
-          workingCount={workingCount}
+          name={myWorkspaceMember?.profile?.displayName || storedUser?.name || "HERO"}
+          avatar={myAvatarProfile}
+          stats={heroStats}
         />
         <MapHud
           rooms={getStageMiniMapRooms(stageRooms)}
@@ -1249,7 +1272,7 @@ export default function WorkspaceOfficePage({
           totalActors={actors.length}
           zoom={stageZoom}
           pan={stagePan}
-          stageSize={stageSize}
+          stageSize={stageWorldSize}
         />
         <MapZoomControls
           zoom={stageZoom}
@@ -1287,6 +1310,7 @@ export default function WorkspaceOfficePage({
           actors={actors}
           selectedActor={selectedActor}
           adminCount={adminCount}
+          chatMessages={chatMessages}
           onTalk={openActorChat}
           onTasks={openFeaturedAgentTasks}
           onDismissAgent={dismissFeaturedAgent}
@@ -1687,12 +1711,15 @@ function WorkspaceActionMenu({
 
 interface StageRoomSpec {
   label: string;
+  sub?: string;
   left: string;
   top: string;
   width: string;
   height: string;
   color: string;
-  variant: "engineering" | "huddle" | "rest";
+  variant: "engineering" | "huddle" | "rest" | "library";
+  doorSide: "top" | "right" | "bottom" | "left";
+  doorAt: number;
 }
 
 interface MiniMapRoom {
@@ -1726,9 +1753,11 @@ interface PresenceSnapshotMember {
 function ArcadeOfficeStage({
   actors,
   rooms,
+  worldSize,
   engineeringRows,
   selectedActorId,
   playerActorId,
+  playerAvatar,
   playerPosition,
   remoteMemberPositions,
   zoom,
@@ -1737,15 +1766,16 @@ function ArcadeOfficeStage({
   onPlayerPositionChange,
   onOpenTasks,
   onOpenChatWithActor,
-  onSizeChange,
   onActorContextMenu,
   onActorSelect,
 }: {
   actors: OfficeActor[];
   rooms: StageRoomSpec[];
+  worldSize: StageSize;
   engineeringRows: number;
   selectedActorId: string | null;
   playerActorId: string | null;
+  playerAvatar: StoredCharacterProfile | null;
   playerPosition: StageActorPosition | null;
   remoteMemberPositions: Record<number, StageActorPosition>;
   zoom: number;
@@ -1754,21 +1784,33 @@ function ArcadeOfficeStage({
   onPlayerPositionChange: (position: StageActorPosition) => void;
   onOpenTasks: () => void;
   onOpenChatWithActor: (actor: OfficeActor) => void;
-  onSizeChange: (size: StageSize) => void;
   onActorContextMenu: (payload: { actor: OfficeActor; x: number; y: number }) => void;
   onActorSelect: (actor: OfficeActor) => void;
 }) {
   const engineeringRoom = rooms.find((r) => r.variant === "engineering") ?? rooms[0];
   const loungeRoom = rooms.find((r) => r.variant === "rest") ?? null;
   const stageRef = useRef<HTMLDivElement | null>(null);
-  const playerWalkTimerRef = useRef<number | null>(null);
+  const keysRef = useRef<Record<string, boolean>>({});
+  const playerPositionRef = useRef<StageActorPosition | null>(playerPosition);
+  const fixedStageSizeRef = useRef<StageSize | null>(null);
+  const zoomRef = useRef(zoom);
+  const panRef = useRef(pan);
+  const onPanChangeRef = useRef(onPanChange);
+  const onPlayerPositionChangeRef = useRef(onPlayerPositionChange);
   const actorPositionRef = useRef<Map<string, StageActorPosition>>(new Map());
   const interactableActorsRef = useRef<Array<{ actor: OfficeActor; position: StageActorPosition }>>([]);
   const onOpenChatWithActorRef = useRef(onOpenChatWithActor);
+  const onActorSelectRef = useRef(onActorSelect);
+  const onOpenTasksRef = useRef(onOpenTasks);
+  const wallsRef = useRef<WallSegment[]>([]);
   const actorTravelTimerRef = useRef<Map<string, number>>(new Map());
-  const [fixedStageSize, setFixedStageSize] = useState<StageSize | null>(null);
+  const agentMotionTimersRef = useRef<Map<string, number[]>>(new Map());
+  const fixedStageSize = worldSize;
   const [playerWalking, setPlayerWalking] = useState(false);
+  const [playerDirection, setPlayerDirection] = useState<PixelAvatarDirection>("S");
   const [travelingActorIds, setTravelingActorIds] = useState<Set<string>>(() => new Set());
+  const [agentVisualPositions, setAgentVisualPositions] = useState<Record<string, StageActorPosition>>({});
+  const [agentTransitionMs, setAgentTransitionMs] = useState<Record<string, number>>({});
   const playerNearQuest = playerPosition ? isNearQuestMarker(playerPosition) : false;
   const [drag, setDrag] = useState<{
     pointerId: number;
@@ -1779,28 +1821,32 @@ function ArcadeOfficeStage({
   } | null>(null);
 
   useEffect(() => {
-    const node = stageRef.current;
-    if (!node) return;
-    const size = {
-      width: Math.max(1, node.clientWidth),
-      height: Math.max(1, node.clientHeight),
-    };
-    setFixedStageSize(size);
-    onSizeChange(size);
-  }, [onSizeChange]);
+    onOpenChatWithActorRef.current = onOpenChatWithActor;
+    onActorSelectRef.current = onActorSelect;
+    onOpenTasksRef.current = onOpenTasks;
+    onPanChangeRef.current = onPanChange;
+    onPlayerPositionChangeRef.current = onPlayerPositionChange;
+  }, [onActorSelect, onOpenChatWithActor, onOpenTasks, onPanChange, onPlayerPositionChange]);
 
   useEffect(() => {
-    onOpenChatWithActorRef.current = onOpenChatWithActor;
-  }, [onOpenChatWithActor]);
+    playerPositionRef.current = playerPosition;
+    fixedStageSizeRef.current = fixedStageSize;
+    zoomRef.current = zoom;
+    panRef.current = pan;
+  }, [fixedStageSize, pan, playerPosition, zoom]);
+
+  useEffect(() => {
+    wallsRef.current = buildStageWalls(rooms);
+  }, [rooms]);
 
   useEffect(() => {
     const travelTimers = actorTravelTimerRef.current;
+    const motionTimers = agentMotionTimersRef.current;
     return () => {
-      if (playerWalkTimerRef.current != null) {
-        window.clearTimeout(playerWalkTimerRef.current);
-      }
       travelTimers.forEach((timerId) => window.clearTimeout(timerId));
       travelTimers.clear();
+      motionTimers.forEach((list) => list.forEach((timerId) => window.clearTimeout(timerId)));
+      motionTimers.clear();
     };
   }, []);
 
@@ -1825,13 +1871,19 @@ function ArcadeOfficeStage({
       actor.kind === "member" && !isPlayer
         ? remoteMemberPositions[memberIdFromActor(actor) ?? -1]
         : null;
-    const position =
+    const logicalPosition =
       isPlayer && playerPosition ? playerPosition : remotePosition ?? loungePosition ?? basePosition;
     const actorId = String(actor.id);
+    const visualPosition =
+      actor.kind === "agent" ? agentVisualPositions[actorId] : null;
+    const position = visualPosition ?? logicalPosition;
+    const transitionMs = actor.kind === "agent" ? agentTransitionMs[actorId] : undefined;
     return {
       actor,
       isPlayer,
       position,
+      logicalPosition,
+      transitionMs,
       traveling: travelingActorIds.has(actorId),
     };
   });
@@ -1841,17 +1893,58 @@ function ArcadeOfficeStage({
       .filter((item) => !item.isPlayer)
       .map((item) => ({ actor: item.actor, position: item.position }));
     const nextPositions = new Map<string, StageActorPosition>();
+    const seenAgentIds = new Set<string>();
     for (const item of renderedActors) {
       const actorId = String(item.actor.id);
+      const logicalPosition = item.logicalPosition;
       const previousPosition = actorPositionRef.current.get(actorId);
-      nextPositions.set(actorId, item.position);
-      if (
-        item.actor.kind !== "agent" ||
-        !previousPosition ||
-        sameStagePosition(previousPosition, item.position)
-      ) {
-        continue;
+      nextPositions.set(actorId, logicalPosition);
+
+      if (item.actor.kind !== "agent") continue;
+      seenAgentIds.add(actorId);
+
+      if (!previousPosition) continue;
+
+      if (sameStagePosition(previousPosition, logicalPosition)) continue;
+
+      const oldTimers = agentMotionTimersRef.current.get(actorId);
+      if (oldTimers) oldTimers.forEach((t) => window.clearTimeout(t));
+
+      const path = computeAgentPath(previousPosition, logicalPosition, rooms);
+      const stage = fixedStageSizeRef.current;
+      const stageW = stage?.width ?? 1200;
+      const stageH = stage?.height ?? 800;
+      const zoomFactor = zoomRef.current || 1;
+      const motionTimers: number[] = [];
+
+      let prev = {
+        x: parseStagePct(previousPosition.left),
+        y: parseStagePct(previousPosition.top),
+      };
+      let cumulativeMs = 0;
+      for (const waypoint of path) {
+        const dxPx = ((waypoint.x - prev.x) / 100) * stageW;
+        const dyPx = ((waypoint.y - prev.y) / 100) * stageH;
+        const distancePx = Math.hypot(dxPx, dyPx);
+        const segmentMs = Math.max(
+          AGENT_TRAVEL_MIN_SEGMENT_MS,
+          (distancePx * zoomFactor / PLAYER_MOVE_SPEED_PX) * 1000,
+        );
+        const startMs = cumulativeMs;
+        const target = waypoint;
+        const t = window.setTimeout(() => {
+          setAgentTransitionMs((prevMs) => ({ ...prevMs, [actorId]: segmentMs }));
+          setAgentVisualPositions((prevPos) => ({
+            ...prevPos,
+            [actorId]: { left: pct(target.x), top: pct(target.y) },
+          }));
+        }, Math.max(1, startMs));
+        motionTimers.push(t);
+        cumulativeMs += segmentMs;
+        prev = waypoint;
       }
+      agentMotionTimersRef.current.set(actorId, motionTimers);
+      const totalMs = cumulativeMs;
 
       window.setTimeout(() => {
         setTravelingActorIds((prev) => {
@@ -1874,35 +1967,49 @@ function ArcadeOfficeStage({
           next.delete(actorId);
           return next;
         });
-      }, AGENT_TRAVEL_DURATION_MS);
+      }, totalMs);
       actorTravelTimerRef.current.set(actorId, timerId);
     }
     actorPositionRef.current = nextPositions;
+
+    const visualKeys = Object.keys(agentVisualPositions);
+    const stale = visualKeys.filter((id) => !seenAgentIds.has(id));
+    if (stale.length > 0) {
+      queueMicrotask(() => {
+        setAgentVisualPositions((prev) => {
+          const next = { ...prev };
+          for (const id of stale) delete next[id];
+          return next;
+        });
+        setAgentTransitionMs((prev) => {
+          const next = { ...prev };
+          for (const id of stale) delete next[id];
+          return next;
+        });
+        for (const id of stale) {
+          const timers = agentMotionTimersRef.current.get(id);
+          if (timers) timers.forEach((t) => window.clearTimeout(t));
+          agentMotionTimersRef.current.delete(id);
+        }
+      });
+    }
   });
 
   useEffect(() => {
-    if (!playerPosition || !fixedStageSize) return;
-    const playerLeftPct = parseStagePct(playerPosition.left);
-    const playerTopPct = parseStagePct(playerPosition.top);
-    const targetX = -((playerLeftPct - 50) / 100) * fixedStageSize.width * zoom;
-    const targetY = -((playerTopPct - 50) / 100) * fixedStageSize.height * zoom;
-    onPanChange({ x: targetX, y: targetY });
-  }, [playerPosition, fixedStageSize, zoom, onPanChange]);
-
-  useEffect(() => {
-    const stageSizeForKeyboard = fixedStageSize;
-    const currentPlayerPosition = playerPosition;
-    if (!playerActorId || !currentPlayerPosition || !stageSizeForKeyboard) return;
-    const keyboardPosition: StageActorPosition = currentPlayerPosition;
-    const keyboardStageSize: StageSize = stageSizeForKeyboard;
+    if (!playerActorId) return;
+    let rafId = 0;
+    let lastFrame = 0;
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "/") {
+      const key = event.key.toLowerCase();
+      if (key === "/") {
         if (event.metaKey || event.ctrlKey || event.altKey) return;
         if (shouldIgnoreStageMovementKey(event.target)) return;
+        const keyboardPosition = playerPositionRef.current;
+        if (!keyboardPosition) return;
         if (isNearQuestMarker(keyboardPosition)) {
           event.preventDefault();
-          onOpenTasks();
+          onOpenTasksRef.current();
           return;
         }
         const nearestActor = findNearestInteractableActor(
@@ -1911,39 +2018,73 @@ function ArcadeOfficeStage({
         );
         if (nearestActor) {
           event.preventDefault();
-          onOpenChatWithActorRef.current(nearestActor);
-          return;
+          onActorSelectRef.current(nearestActor);
         }
         return;
       }
 
-      const direction = getPlayerMoveDirection(event.key);
-      if (!direction || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (!isPlayerMoveKey(key) && key !== "shift") return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (shouldIgnoreStageMovementKey(event.target)) return;
+      if (isPlayerMoveKey(key)) event.preventDefault();
+      keysRef.current[key] = true;
+    }
 
-      event.preventDefault();
-      const stepPx = event.shiftKey ? PLAYER_MOVE_FAST_STEP_PX : PLAYER_MOVE_STEP_PX;
-      const nextPosition = moveStagePosition(
-        keyboardPosition,
-        (direction.x * stepPx * 100) / Math.max(1, keyboardStageSize.width * zoom),
-        (direction.y * stepPx * 100) / Math.max(1, keyboardStageSize.height * zoom),
-      );
-      onPlayerPositionChange(nextPosition);
-      setPlayerWalking(true);
-      if (playerWalkTimerRef.current != null) {
-        window.clearTimeout(playerWalkTimerRef.current);
+    function handleKeyUp(event: KeyboardEvent) {
+      keysRef.current[event.key.toLowerCase()] = false;
+    }
+
+    function tick(time: number) {
+      const currentPosition = playerPositionRef.current;
+      const keyboardStageSize = fixedStageSizeRef.current;
+      if (currentPosition && keyboardStageSize) {
+        const dt = lastFrame ? Math.min(0.05, (time - lastFrame) / 1000) : 0;
+        const keys = keysRef.current;
+        let dx = 0;
+        let dy = 0;
+        if (keys.w || keys.arrowup) dy -= 1;
+        if (keys.s || keys.arrowdown) dy += 1;
+        if (keys.a || keys.arrowleft) dx -= 1;
+        if (keys.d || keys.arrowright) dx += 1;
+
+        if (dx !== 0 || dy !== 0) {
+          const len = Math.hypot(dx, dy) || 1;
+          const speedPx = keys.shift ? PLAYER_MOVE_FAST_SPEED_PX : PLAYER_MOVE_SPEED_PX;
+          const stepPx = speedPx * dt;
+          const direction = { x: dx / len, y: dy / len };
+          const deltaXPct = (direction.x * stepPx * 100) / Math.max(1, keyboardStageSize.width * zoomRef.current);
+          const deltaYPct = (direction.y * stepPx * 100) / Math.max(1, keyboardStageSize.height * zoomRef.current);
+          const nextPosition = resolveStageMove(currentPosition, deltaXPct, deltaYPct, wallsRef.current);
+          const nextDir: PixelAvatarDirection =
+            Math.abs(dx) > Math.abs(dy)
+              ? dx > 0 ? "E" : "W"
+              : dy < 0 ? "N" : "S";
+          playerPositionRef.current = nextPosition;
+          setPlayerDirection(nextDir);
+          setPlayerWalking(true);
+          const targetPan = getStagePanForPosition(nextPosition, keyboardStageSize, zoomRef.current);
+          const nextPan = smoothStagePan(panRef.current, targetPan, CAMERA_FOLLOW_SMOOTHING);
+          panRef.current = nextPan;
+          onPanChangeRef.current(nextPan);
+          onPlayerPositionChangeRef.current(nextPosition);
+        } else {
+          setPlayerWalking(false);
+        }
       }
-      playerWalkTimerRef.current = window.setTimeout(() => {
-        setPlayerWalking(false);
-        playerWalkTimerRef.current = null;
-      }, 360);
+      lastFrame = time;
+      rafId = window.requestAnimationFrame(tick);
     }
 
     window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    rafId = window.requestAnimationFrame(tick);
     return () => {
+      keysRef.current = {};
       window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.cancelAnimationFrame(rafId);
     };
-  }, [fixedStageSize, onOpenTasks, onPlayerPositionChange, playerActorId, playerPosition, zoom]);
+  }, [playerActorId]);
 
   function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
     if (event.button !== 0) return;
@@ -1990,18 +2131,14 @@ function ArcadeOfficeStage({
       onPointerCancel={handlePointerEnd}
     >
       <div
-        className={fixedStageSize ? "absolute left-1/2 top-1/2" : "absolute inset-0"}
+        className="absolute left-1/2 top-1/2"
         style={{
-          ...(fixedStageSize
-            ? {
-                width: fixedStageSize.width,
-                height: fixedStageSize.height,
-                marginLeft: -(fixedStageSize.width / 2),
-                marginTop: -(fixedStageSize.height / 2),
-              }
-            : null),
+          width: fixedStageSize.width,
+          height: fixedStageSize.height,
+          marginLeft: -(fixedStageSize.width / 2),
+          marginTop: -(fixedStageSize.height / 2),
           transform: `translate3d(${pan.x}px, ${pan.y}px, 0)`,
-          transition: drag ? "none" : "transform 160ms ease-out",
+          transition: drag || playerWalking ? "none" : "transform 160ms ease-out",
         }}
       >
         <div
@@ -2016,26 +2153,30 @@ function ArcadeOfficeStage({
             className="absolute inset-0"
             style={{
               backgroundImage:
-                "linear-gradient(rgba(154,122,255,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(154,122,255,0.08) 1px, transparent 1px)",
-              backgroundSize: "22px 22px",
+                "repeating-linear-gradient(0deg, rgba(154,122,255,0.07) 0 1px, transparent 1px 24px), repeating-linear-gradient(90deg, rgba(154,122,255,0.07) 0 1px, transparent 1px 24px), repeating-conic-gradient(rgba(154,122,255,0.025) 0 25%, transparent 0 50%)",
+              backgroundSize: "24px 24px, 24px 24px, 48px 48px",
             }}
           />
+          <StageCorridors rooms={rooms} />
 
           {rooms.map((room) => (
             <StageRoom key={room.label} room={room} engineeringRows={engineeringRows} />
           ))}
 
-          <QuestMarker active={playerNearQuest} />
+          <QuestMarker active={playerNearQuest} position={QUEST_MARKER_POSITION} />
 
-          {renderedActors.map(({ actor, isPlayer, position, traveling }) => {
+          {renderedActors.map(({ actor, isPlayer, position, transitionMs, traveling }) => {
             return (
               <StageActor
                 key={actor.id}
                 actor={actor}
                 position={position}
                 isPlayer={isPlayer}
+                playerAvatar={playerAvatar}
                 travel={actor.kind === "agent"}
+                travelMs={transitionMs}
                 walking={(isPlayer && playerWalking) || traveling}
+                direction={isPlayer ? playerDirection : "S"}
                 selected={String(actor.id) === selectedActorId}
                 onSelect={onActorSelect}
                 onContextMenu={onActorContextMenu}
@@ -2089,6 +2230,14 @@ function StageRoom({
   room: StageRoomSpec;
   engineeringRows: number;
 }) {
+  const doorPct = room.doorAt * 100;
+  const doorHalfPct = 5;
+  const wallColor = room.color;
+  const wallStyle = {
+    position: "absolute" as const,
+    background: wallColor,
+    boxShadow: `0 0 10px ${wallColor}80`,
+  };
   return (
     <section
       className="absolute overflow-hidden"
@@ -2097,14 +2246,65 @@ function StageRoom({
         top: room.top,
         width: room.width,
         height: room.height,
-        border: `1px solid ${room.color}`,
         background: `${room.color}08`,
-        boxShadow: `inset 0 0 42px ${room.color}08`,
+        backgroundImage:
+          "repeating-linear-gradient(0deg, rgba(255,255,255,0.045) 0 1px, transparent 1px 24px), repeating-linear-gradient(90deg, rgba(255,255,255,0.045) 0 1px, transparent 1px 24px)",
+        boxShadow: `inset 0 0 42px ${room.color}18`,
       }}
     >
+      {room.doorSide === "top" ? (
+        <>
+          <div style={{ ...wallStyle, left: 0, top: 0, height: 3, width: `${Math.max(0, doorPct - doorHalfPct)}%` }} />
+          <div style={{ ...wallStyle, left: `${Math.min(100, doorPct + doorHalfPct)}%`, top: 0, height: 3, right: 0 }} />
+        </>
+      ) : (
+        <div style={{ ...wallStyle, left: 0, top: 0, right: 0, height: 3 }} />
+      )}
+      {room.doorSide === "bottom" ? (
+        <>
+          <div style={{ ...wallStyle, left: 0, bottom: 0, height: 3, width: `${Math.max(0, doorPct - doorHalfPct)}%` }} />
+          <div style={{ ...wallStyle, left: `${Math.min(100, doorPct + doorHalfPct)}%`, bottom: 0, height: 3, right: 0 }} />
+        </>
+      ) : (
+        <div style={{ ...wallStyle, left: 0, bottom: 0, right: 0, height: 3 }} />
+      )}
+      {room.doorSide === "left" ? (
+        <>
+          <div style={{ ...wallStyle, left: 0, top: 0, width: 3, height: `${Math.max(0, doorPct - doorHalfPct)}%` }} />
+          <div style={{ ...wallStyle, left: 0, top: `${Math.min(100, doorPct + doorHalfPct)}%`, width: 3, bottom: 0 }} />
+        </>
+      ) : (
+        <div style={{ ...wallStyle, left: 0, top: 0, bottom: 0, width: 3 }} />
+      )}
+      {room.doorSide === "right" ? (
+        <>
+          <div style={{ ...wallStyle, right: 0, top: 0, width: 3, height: `${Math.max(0, doorPct - doorHalfPct)}%` }} />
+          <div style={{ ...wallStyle, right: 0, top: `${Math.min(100, doorPct + doorHalfPct)}%`, width: 3, bottom: 0 }} />
+        </>
+      ) : (
+        <div style={{ ...wallStyle, right: 0, top: 0, bottom: 0, width: 3 }} />
+      )}
+      {[
+        ["0", "0"],
+        ["calc(100% - 5px)", "0"],
+        ["0", "calc(100% - 5px)"],
+        ["calc(100% - 5px)", "calc(100% - 5px)"],
+      ].map(([left, top], index) => (
+        <div
+          key={index}
+          className="absolute h-[5px] w-[5px]"
+          style={{
+            left,
+            top,
+            background: room.color,
+            boxShadow: `0 0 8px ${room.color}`,
+          }}
+        />
+      ))}
       <div
-        className="absolute left-3 top-3"
+        className="absolute left-5 top-[-1px] px-2 py-1"
         style={{
+          background: "#090b16",
           fontFamily: "var(--font-pixel)",
           fontSize: 8,
           letterSpacing: 2,
@@ -2113,7 +2313,10 @@ function StageRoom({
         }}
       >
         {room.label.startsWith("♦ ") ? (
-          <GlyphText glyph="♦">{room.label.slice(2)}</GlyphText>
+          <GlyphText glyph="♦">
+            {room.label.slice(2)}
+            {room.sub ? ` · ${room.sub}` : ""}
+          </GlyphText>
         ) : (
           room.label
         )}
@@ -2121,7 +2324,59 @@ function StageRoom({
       {room.variant === "engineering" && <EngineeringPlatforms rows={engineeringRows} />}
       {room.variant === "huddle" && <HuddleTable />}
       {room.variant === "rest" && <RestLounge />}
+      {room.variant === "library" && <LibraryRoom />}
     </section>
+  );
+}
+
+function StageCorridors({ rooms }: { rooms: StageRoomSpec[] }) {
+  const engineering = rooms.find((room) => room.variant === "engineering");
+  const huddle = rooms.find((room) => room.variant === "huddle");
+  const lounge = rooms.find((room) => room.variant === "rest");
+  const library = rooms.find((room) => room.variant === "library");
+  if (!engineering || !huddle || !lounge || !library) return null;
+
+  const engineeringRight = parseStagePct(engineering.left) + parseStagePct(engineering.width);
+  const huddleLeft = parseStagePct(huddle.left);
+  const topY = Math.min(parseStagePct(engineering.top), parseStagePct(huddle.top));
+  const bottomY = Math.max(
+    parseStagePct(lounge.top) + parseStagePct(lounge.height),
+    parseStagePct(library.top) + parseStagePct(library.height),
+  );
+  const lowerTop = Math.min(parseStagePct(lounge.top), parseStagePct(library.top));
+  const engineeringBottom = parseStagePct(engineering.top) + parseStagePct(engineering.height);
+  const verticalWidth = Math.max(1.3, Math.min(2.2, huddleLeft - engineeringRight));
+  const verticalCenter = engineeringRight + (huddleLeft - engineeringRight) / 2;
+  const horizontalHeight = 3.4;
+  const horizontalTop = engineeringBottom + (lowerTop - engineeringBottom) / 2 - horizontalHeight / 2;
+
+  return (
+    <>
+      <div
+        className="absolute"
+        style={{
+          left: pct(verticalCenter - verticalWidth / 2),
+          top: pct(topY),
+          width: pct(verticalWidth),
+          height: pct(bottomY - topY),
+          background: "rgba(154,122,255,0.04)",
+          borderLeft: `1px dashed ${t4.line}`,
+          borderRight: `1px dashed ${t4.line}`,
+          pointerEvents: "none",
+        }}
+      />
+      <div
+        className="absolute left-0 right-0"
+        style={{
+          top: pct(horizontalTop),
+          height: pct(horizontalHeight),
+          background: "rgba(154,122,255,0.06)",
+          borderTop: `1px dashed ${t4.line}`,
+          borderBottom: `1px dashed ${t4.line}`,
+          pointerEvents: "none",
+        }}
+      />
+    </>
   );
 }
 
@@ -2133,35 +2388,154 @@ function EngineeringPlatforms({ rows }: { rows: number }) {
     <>
       {rowCenters.flatMap((cy, rowIdx) =>
         AGENT_DESK_COL_CENTERS.map((cx, colIdx) => (
-          <div
+          <StageDesk
             key={`${rowIdx}-${colIdx}`}
-            className="absolute"
-            style={{
-              left: pct(cx - deskW / 2),
-              top: pct(cy - deskH / 2),
-              width: pct(deskW),
-              height: pct(deskH),
-              border: `1px solid ${t4.agent}`,
-              background: `${t4.agent}24`,
-              boxShadow: `0 0 12px ${t4.agent}18`,
-            }}
+            left={pct(cx - deskW / 2)}
+            top={pct(cy - deskH / 2)}
+            width={pct(deskW)}
+            height={pct(deskH)}
           />
         )),
       )}
+      <StagePlant left="84%" top="8%" color={t4.ok} />
+      <StagePlant left="84%" top="82%" color={t4.ok} />
     </>
+  );
+}
+
+function StageDesk({
+  left,
+  top,
+  width,
+  height,
+}: {
+  left: string;
+  top: string;
+  width: string;
+  height: string;
+}) {
+  return (
+    <div className="absolute" style={{ left, top, width, height, minHeight: 46 }}>
+      <div
+        className="absolute bottom-[12%] left-0 right-0 h-[54%]"
+        style={{
+          border: `1px solid ${t4.line}`,
+          background: "#1a2040",
+          boxShadow: "inset 0 -3px 0 rgba(0,0,0,0.5)",
+        }}
+      />
+      <div
+        className="absolute left-1/2 top-0 h-[44%] w-[46%] -translate-x-1/2"
+        style={{
+          border: `1px solid ${t4.line}`,
+          background: "#0a1024",
+        }}
+      />
+    </div>
+  );
+}
+
+function StageChair({ left, top, color = t4.line }: { left: string; top: string; color?: string }) {
+  return (
+    <div className="absolute h-[10%] w-[7%]" style={{ left, top }}>
+      <div className="absolute inset-0" style={{ border: `1px solid ${color}`, background: "rgba(40,48,80,0.6)" }} />
+      <div className="absolute left-[12%] right-[12%] top-[-15%] h-[24%]" style={{ background: color, opacity: 0.7 }} />
+    </div>
+  );
+}
+
+function StagePlant({ left, top, color = t4.ok }: { left: string; top: string; color?: string }) {
+  return (
+    <div className="absolute h-[11%] w-[5%]" style={{ left, top }}>
+      <div className="absolute bottom-0 left-[25%] h-[28%] w-1/2" style={{ border: `1px solid ${color}55`, background: "#3a2a1a" }} />
+      <div className="absolute left-[35%] top-0 h-[32%] w-[32%]" style={{ background: color, boxShadow: `0 0 6px ${color}80` }} />
+      <div className="absolute left-[10%] top-[20%] h-[32%] w-[32%]" style={{ background: color, opacity: 0.85 }} />
+      <div className="absolute right-[10%] top-[20%] h-[32%] w-[32%]" style={{ background: color, opacity: 0.85 }} />
+    </div>
+  );
+}
+
+function StageTaskChip({
+  left,
+  top,
+  color,
+  label,
+}: {
+  left: string;
+  top: string;
+  color: string;
+  label: string;
+}) {
+  return (
+    <div className="absolute -translate-x-1/2 -translate-y-full" style={{ left, top, pointerEvents: "none" }}>
+      <div
+        className="whitespace-nowrap px-1.5 py-1"
+        style={{
+          border: `1px solid ${color}`,
+          background: "rgba(10,13,26,0.95)",
+          boxShadow: `0 0 8px ${color}80`,
+          color,
+          fontFamily: "var(--font-pixel)",
+          fontSize: 7,
+          letterSpacing: 1,
+        }}
+      >
+        {label}
+      </div>
+      <div
+        className="mx-auto mt-px h-0 w-0"
+        style={{
+          borderLeft: "4px solid transparent",
+          borderRight: "4px solid transparent",
+          borderTop: `4px solid ${color}`,
+        }}
+      />
+    </div>
+  );
+}
+
+function CoffeeStation({ left, top }: { left: string; top: string }) {
+  return (
+    <div className="absolute h-[16%] w-[18%]" style={{ left, top }}>
+      <div className="absolute bottom-0 left-0 h-[45%] w-full" style={{ border: `1px solid ${t4.line}`, background: "#1a2040" }} />
+      <div className="absolute bottom-[38%] left-[10%] h-[56%] w-[32%]" style={{ border: `1px solid ${t4.ok}`, background: "#252b48" }}>
+        <span className="absolute left-[18%] top-[18%] h-[18%] w-[28%]" style={{ background: t4.hp }} />
+        <span className="absolute bottom-[16%] left-[15%] right-[15%] h-[24%]" style={{ border: `1px solid ${t4.line}`, background: "#0a0d1a" }} />
+      </div>
+      <div className="absolute bottom-[38%] right-[10%] h-[62%] w-[34%]" style={{ border: `1px solid ${t4.pink}`, background: "#252b48", boxShadow: `0 0 6px ${t4.pink}40` }}>
+        <span className="absolute left-[16%] top-[16%] h-[30%] w-[28%]" style={{ background: t4.ok }} />
+        <span className="absolute right-[16%] top-[16%] h-[30%] w-[28%]" style={{ background: t4.xp }} />
+      </div>
+    </div>
   );
 }
 
 function HuddleTable() {
   return (
-    <div
-      className="absolute left-[31%] top-[39%] h-[31%] w-[37%] rounded-[50%]"
-      style={{
-        border: `1px solid ${t4.mp}`,
-        background: "rgba(90,168,255,0.05)",
-        boxShadow: `0 0 16px ${t4.mp}20`,
-      }}
-    />
+    <>
+      <div
+        className="absolute left-[31%] top-[32%] h-[42%] w-[38%] rounded-[50%]"
+        style={{
+          border: `3px solid ${t4.mp}`,
+          background: "rgba(50,70,110,0.45)",
+          boxShadow: `0 0 18px ${t4.mp}40, inset 0 0 14px ${t4.mp}30`,
+        }}
+      >
+        <div
+          className="absolute left-1/2 top-1/2 h-[28%] w-[25%] -translate-x-1/2 -translate-y-1/2"
+          style={{
+            border: `1px solid ${t4.mp}`,
+            background: "#0a0d1a",
+            boxShadow: `0 0 10px ${t4.mp}`,
+          }}
+        />
+      </div>
+      <StageChair left="25%" top="35%" color={t4.mp} />
+      <StageChair left="72%" top="35%" color={t4.mp} />
+      <StageChair left="25%" top="68%" color={t4.mp} />
+      <StageChair left="72%" top="68%" color={t4.mp} />
+      <StageTaskChip left="50%" top="18%" color={t4.mp} label="STANDUP" />
+    </>
   );
 }
 
@@ -2181,32 +2555,94 @@ function RestLounge() {
   return (
     <>
       <LoungeBench />
+      <StageTaskChip left="35%" top="27%" color={t4.ok} label="BREAK 5min" />
+      <StageTaskChip left="52%" top="27%" color={t4.ok} label="lunch" />
       <div
-        className="absolute left-[58%] top-[27%] h-[28%] w-[22%]"
+        className="absolute left-[36%] top-[48%] h-[13%] w-[18%]"
         style={{
           border: `1px solid ${t4.ok}`,
-          background: `${t4.ok}10`,
+          background: "rgba(40,60,55,0.7)",
           boxShadow: `0 0 12px ${t4.ok}18`,
         }}
       />
-      <div
-        className="absolute left-[14%] top-[24%] h-[22%] w-[16%] rounded-[50%]"
-        style={{
-          border: `1px solid ${t4.ok}`,
-          background: `${t4.ok}12`,
-          boxShadow: `0 0 10px ${t4.ok}18`,
-        }}
-      />
+      <CoffeeStation left="8%" top="72%" />
+      <StagePlant left="84%" top="10%" color={t4.ok} />
+      <StagePlant left="5%" top="10%" color={t4.ok} />
     </>
   );
 }
 
-function QuestMarker({ active }: { active: boolean }) {
+function LibraryRoom() {
+  return (
+    <>
+      <div
+        className="absolute left-[5%] top-[10%] h-[14%] w-[40%]"
+        style={{
+          border: `1px solid ${t4.xp}`,
+          background: `${t4.xp}10`,
+          boxShadow: `inset 0 0 12px ${t4.xp}18`,
+        }}
+      />
+      <div
+        className="absolute left-[55%] top-[10%] h-[14%] w-[40%]"
+        style={{
+          border: `1px solid ${t4.xp}`,
+          background: `${t4.xp}10`,
+          boxShadow: `inset 0 0 12px ${t4.xp}18`,
+        }}
+      />
+      <div
+        className="absolute left-[5%] top-[76%] h-[14%] w-[40%]"
+        style={{
+          border: `1px solid ${t4.xp}`,
+          background: `${t4.xp}10`,
+          boxShadow: `inset 0 0 12px ${t4.xp}18`,
+        }}
+      />
+      <div
+        className="absolute left-[55%] top-[76%] h-[14%] w-[40%]"
+        style={{
+          border: `1px solid ${t4.xp}`,
+          background: `${t4.xp}10`,
+          boxShadow: `inset 0 0 12px ${t4.xp}18`,
+        }}
+      />
+      <div
+        className="absolute left-[26%] top-[38%] h-[22%] w-[48%]"
+        style={{
+          border: `2px solid ${t4.xp}`,
+          background: "rgba(100,80,30,0.32)",
+          boxShadow: `inset 0 0 20px ${t4.xp}30, 0 0 14px ${t4.xp}50`,
+        }}
+      >
+        <div className="absolute left-[6%] top-[20%] h-[20%] w-[8%]" style={{ background: t4.pink, opacity: 0.7 }} />
+        <div className="absolute left-[18%] top-[20%] h-[20%] w-[10%]" style={{ background: t4.mp, opacity: 0.7 }} />
+        <div className="absolute left-[72%] top-[22%] h-[26%] w-[14%]" style={{ border: `1px solid ${t4.ok}`, background: "#0a0d1a", boxShadow: `0 0 8px ${t4.ok}` }} />
+        <div className="absolute left-[18%] top-[60%] h-px w-[45%]" style={{ background: `${t4.ink}66` }} />
+        <div className="absolute left-[18%] top-[72%] h-px w-[52%]" style={{ background: `${t4.ink}55` }} />
+      </div>
+      <StageTaskChip left="35%" top="57%" color={t4.xp} label="research · q2 map" />
+      <StageTaskChip left="58%" top="57%" color={t4.agent} label="WRITE CHANGELOG" />
+      <StagePlant left="4%" top="45%" color={t4.xp} />
+      <StagePlant left="88%" top="45%" color={t4.xp} />
+    </>
+  );
+}
+
+function QuestMarker({
+  active,
+  position,
+}: {
+  active: boolean;
+  position: StageActorPosition;
+}) {
   return (
     <button
       type="button"
-      className="absolute left-[61.5%] top-[13.5%] flex h-[52px] w-[52px] items-center justify-center"
+      className="stage-quest-marker absolute flex h-[52px] w-[52px] items-center justify-center"
       style={{
+        left: position.left,
+        top: position.top,
         border: `2px solid ${t4.xp}`,
         background: "#fff6c7",
         color: "#050713",
@@ -2258,8 +2694,11 @@ function StageActor({
   actor,
   position,
   isPlayer = false,
+  playerAvatar,
   travel,
+  travelMs,
   walking,
+  direction = "S",
   selected,
   onContextMenu,
   onSelect,
@@ -2267,8 +2706,11 @@ function StageActor({
   actor: OfficeActor;
   position: StageActorPosition;
   isPlayer?: boolean;
+  playerAvatar: StoredCharacterProfile | null;
   travel?: boolean;
+  travelMs?: number;
   walking?: boolean;
+  direction?: PixelAvatarDirection;
   selected: boolean;
   onContextMenu: (payload: { actor: OfficeActor; x: number; y: number }) => void;
   onSelect: (actor: OfficeActor) => void;
@@ -2288,8 +2730,10 @@ function StageActor({
       style={{
         left: position.left,
         top: position.top,
-        transition: travel
-          ? `left ${AGENT_TRAVEL_DURATION_MS}ms linear, top ${AGENT_TRAVEL_DURATION_MS}ms linear`
+        transition: isPlayer
+          ? "none"
+          : travel
+          ? `left ${travelMs ?? 320}ms linear, top ${travelMs ?? 320}ms linear`
           : "left 90ms linear, top 90ms linear",
       }}
       onClick={() => onSelect(actor)}
@@ -2394,7 +2838,21 @@ function StageActor({
               : `drop-shadow(0 0 8px ${accent}80)`,
         }}
       >
-        <PixelAvatar kind={pickAvatarKind(actor.name, isAgent)} size={3} walking={avatarWalking} />
+        <PixelAvatar
+          kind={
+            isPlayer && playerAvatar
+              ? playerAvatar.kind
+              : actor.avatarProfile?.kind ?? pickAvatarKind(actor.name, isAgent)
+          }
+          paletteOverride={
+            isPlayer
+              ? playerAvatar?.paletteOverride ?? actor.avatarProfile?.paletteOverride
+              : actor.avatarProfile?.paletteOverride
+          }
+          direction={direction}
+          size={3}
+          walking={avatarWalking}
+        />
       </div>
     </button>
   );
@@ -2556,7 +3014,7 @@ function ActorChatSidePanel({
   if (!open || !target) return null;
   const isAgent = target?.kind === "agent";
   const accent = isAgent ? t4.agent : t4.pink;
-  const avatarKind: PixelAvatarKind = isAgent ? "agent" : "mira";
+  const avatarKind: PixelAvatarKind = isAgent ? "agent" : target.avatarProfile?.kind ?? "mira";
   const showingTasks = isAgent && activeTab === "tasks";
 
   return (
@@ -2585,7 +3043,11 @@ function ActorChatSidePanel({
               flexShrink: 0,
             }}
           >
-            <PixelAvatar kind={avatarKind} size={2} />
+            <PixelAvatar
+              kind={avatarKind}
+              size={2}
+              paletteOverride={!isAgent ? target.avatarProfile?.paletteOverride : undefined}
+            />
           </div>
           <div className="min-w-0">
             <p
@@ -3544,19 +4006,15 @@ function TaskDetailNotice({ text, danger = false }: { text: string; danger?: boo
 
 function HeroHud({
   name,
-  memberCount,
-  workingCount,
+  avatar,
+  stats,
 }: {
   name: string;
-  memberCount: number;
-  workingCount: number;
+  avatar: StoredCharacterProfile | null;
+  stats: HeroHudStats;
 }) {
-  const kind = pickAvatarKind(name);
+  const kind = avatar?.kind ?? pickAvatarKind(name);
   const display = name.toUpperCase().slice(0, 10);
-  const rank = Math.max(1, Math.min(99, memberCount * 7 + workingCount * 3));
-  const healthPct = workingCount === 0 ? 100 : Math.max(20, 100 - workingCount * 12);
-  const flowPct = Math.min(95, 25 + workingCount * 15);
-  const impactPct = Math.min(100, 12 + memberCount * 9);
   return (
     <T4Panel
       label="HERO"
@@ -3565,7 +4023,7 @@ function HeroHud({
     >
       <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
         <div style={{ background: "rgba(0,0,0,0.4)", padding: 4, border: `1px solid ${t4.pink}` }}>
-          <PixelAvatar kind={kind} size={2} />
+          <PixelAvatar kind={kind} size={2} paletteOverride={avatar?.paletteOverride} />
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -3573,18 +4031,78 @@ function HeroHud({
               {display}
             </span>
             <span style={{ fontFamily: "var(--font-pixel)", fontSize: 8, color: t4.xp, letterSpacing: 1 }}>
-              RANK {String(rank).padStart(2, "0")}
+              RANK {String(stats.rank).padStart(2, "0")}
             </span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 6 }}>
-            <MiniBar label="HEALTH" pct={healthPct} color={t4.hp} />
-            <MiniBar label="FLOW" pct={flowPct} color={t4.mp} />
-            <MiniBar label="IMPACT" pct={impactPct} color={t4.xp} thin />
+            <MiniBar label="HEALTH" pct={stats.healthPct} color={t4.hp} />
+            <MiniBar label="FLOW" pct={stats.flowPct} color={t4.mp} />
+            <MiniBar label="IMPACT" pct={stats.impactPct} color={t4.xp} thin />
           </div>
         </div>
       </div>
     </T4Panel>
   );
+}
+
+interface HeroHudStats {
+  rank: number;
+  healthPct: number;
+  flowPct: number;
+  impactPct: number;
+}
+
+function buildHeroHudStats(
+  tasks: WorkspaceTask[],
+  actors: OfficeActor[],
+  memberStats?: WorkspaceMemberTaskStats,
+): HeroHudStats {
+  if (memberStats) {
+    return {
+      rank: Math.round(clampMiniMapValue(memberStats.rank, 1, 99)),
+      healthPct: Math.round(clampMiniMapValue(memberStats.healthScore, 0, 100)),
+      flowPct: Math.round(clampMiniMapValue(memberStats.flowScore, 0, 100)),
+      impactPct: Math.round(clampMiniMapValue(memberStats.impactScore, 0, 100)),
+    };
+  }
+
+  const countStatus = (status: TaskStatus) =>
+    tasks.reduce((count, task) => count + (task.status === status ? 1 : 0), 0);
+  const activeTasks = tasks.filter((task) => ACTIVE_AGENT_TASK_STATUSES.includes(task.status)).length;
+  const completedTasks = countStatus("COMPLETED");
+  const failedTasks = countStatus("FAILED");
+  const canceledTasks = countStatus("CANCELED");
+  const waitingUserTasks = countStatus("WAITING_USER");
+  const agentActors = actors.filter((actor) => actor.kind === "agent");
+  const workingAgents = agentActors.filter((actor) => actor.status === "working").length;
+  const blockedAgents = agentActors.filter(
+    (actor) => actor.status === "blocked" || actor.status === "review",
+  ).length;
+  const totalTasks = tasks.length;
+  const flowCapacity = Math.max(1, agentActors.length * 2);
+
+  const healthPct = clampMiniMapValue(
+    100 - failedTasks * 18 - waitingUserTasks * 10 - blockedAgents * 12 - canceledTasks * 4,
+    15,
+    100,
+  );
+  const flowPct =
+    activeTasks === 0 && workingAgents === 0
+      ? 0
+      : clampMiniMapValue(20 + (activeTasks / flowCapacity) * 55 + workingAgents * 8, 5, 100);
+  const impactPct =
+    totalTasks === 0
+      ? 0
+      : clampMiniMapValue((completedTasks / totalTasks) * 100, 0, 100);
+  const rankScore = healthPct * 0.35 + flowPct * 0.2 + impactPct * 0.45;
+  const rank = Math.round(clampMiniMapValue(100 - rankScore + 1, 1, 99));
+
+  return {
+    rank,
+    healthPct: Math.round(healthPct),
+    flowPct: Math.round(flowPct),
+    impactPct: Math.round(impactPct),
+  };
 }
 
 function MiniBar({
@@ -3823,6 +4341,7 @@ function DialogueBox({
   actors,
   selectedActor,
   adminCount,
+  chatMessages,
   onTalk,
   onTasks,
   onDismissAgent,
@@ -3832,6 +4351,7 @@ function DialogueBox({
   actors: OfficeActor[];
   selectedActor: OfficeActor | null;
   adminCount: number;
+  chatMessages: Record<string, ChatMessage[]>;
   onTalk: (actor: OfficeActor) => void;
   onTasks: () => void;
   onDismissAgent: (actor: OfficeActor | null) => void;
@@ -3844,8 +4364,20 @@ function DialogueBox({
   const dismissing = Boolean(featuredAgentId && dismissBusyId === featuredAgentId);
   const speaker = featured?.name ?? "GUIDE";
   const accent = featured ? (isAgent ? t4.agent : t4.pink) : t4.dim;
-  const avatarKind: PixelAvatarKind = featured ? pickAvatarKind(featured.name, isAgent) : "agent";
-  const line = featured
+  const avatarKind: PixelAvatarKind = featured
+    ? featured.avatarProfile?.kind ?? pickAvatarKind(featured.name, isAgent)
+    : "agent";
+  const history = featured ? chatMessages[chatKey(featured)] ?? [] : [];
+  const lastTargetMessage = (() => {
+    for (let i = history.length - 1; i >= 0; i--) {
+      const msg = history[i];
+      if (msg.from === "target" && msg.text.trim().length > 0) return msg;
+    }
+    return null;
+  })();
+  const line = lastTargetMessage
+    ? `"${lastTargetMessage.text}"`
+    : featured
     ? isAgent
       ? `"I cloned the latest branch — ${actors.length} workspace members on deck, ${adminCount} admin online. Want me to triage the next quest?"`
       : `"${speaker} is ${STATUS_META[featured.status].label}. Wave hi or hand off a quest."`
@@ -3876,7 +4408,11 @@ function DialogueBox({
             boxShadow: `0 0 10px ${accent}50`,
           }}
         >
-          <PixelAvatar kind={avatarKind} size={3} />
+          <PixelAvatar
+            kind={avatarKind}
+            size={3}
+            paletteOverride={featured && !isAgent ? featured.avatarProfile?.paletteOverride : undefined}
+          />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
@@ -3990,6 +4526,85 @@ function pickAvatarKind(name: string, agent = false): PixelAvatarKind {
   return kinds[h % kinds.length];
 }
 
+function memberProfileToStoredCharacter(
+  profile?: MemberProfile | null,
+): StoredCharacterProfile | undefined {
+  if (!profile) return undefined;
+  const kinds: PixelAvatarKind[] = ["mira", "alex", "kenji", "yuna", "diego", "iris"];
+  if (!kinds.includes(profile.avatarKind as PixelAvatarKind)) return undefined;
+  const kind = profile.avatarKind as PixelAvatarKind;
+  const { skin, hair, shirt } = profile.avatarColors ?? {};
+  if (isOriginalAvatarColorSet(kind, profile.avatarColors)) {
+    return { kind };
+  }
+  return {
+    kind,
+    paletteOverride: {
+      skin,
+      skin2: shadeForAvatarColor(skin),
+      hair,
+      hair2: shadeForAvatarColor(hair),
+      shirt,
+      shirt2: shadeForAvatarColor(shirt),
+    },
+  };
+}
+
+function isOriginalAvatarColorSet(
+  kind: PixelAvatarKind,
+  colors?: { skin?: string; hair?: string; shirt?: string },
+) {
+  const palette = PA_PALETTES[kind] ?? PA_PALETTES.mira;
+  return (
+    colors?.skin === palette.skin &&
+    colors?.hair === palette.hair &&
+    colors?.shirt === palette.shirt
+  );
+}
+
+function shadeForAvatarColor(color?: string) {
+  const shades: Record<string, string> = {
+    "#f8d4b0": "#c8a47a",
+    "#f0c098": "#c08868",
+    "#d8a878": "#a87848",
+    "#9a6a48": "#6f472f",
+    "#1a1a1a": "#0a0a0a",
+    "#3a2a1a": "#1f1410",
+    "#a83a3a": "#6a1f1f",
+    "#5a3a8a": "#2a1a4a",
+    "#d8a838": "#a87808",
+    "#2a3a4a": "#15202c",
+    "#3a5a3a": "#1a3a1a",
+    "#a83a6a": "#681a3a",
+    "#d8c89a": "#a89868",
+  };
+  return color ? shades[color] ?? color : undefined;
+}
+
+function loadStoredCharacterProfile(): StoredCharacterProfile | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(CHARACTER_STORAGE_KEY);
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as {
+      kind?: string;
+      colorMode?: string;
+      paletteOverride?: PixelAvatarPaletteOverride;
+    };
+    const kinds: PixelAvatarKind[] = ["mira", "alex", "kenji", "yuna", "diego", "iris"];
+    if (!saved.kind || !kinds.includes(saved.kind as PixelAvatarKind)) return null;
+    if (saved.colorMode === "original") {
+      return { kind: saved.kind as PixelAvatarKind };
+    }
+    return {
+      kind: saved.kind as PixelAvatarKind,
+      paletteOverride: saved.paletteOverride,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function Skyline() {
   return (
     <div
@@ -4007,19 +4622,20 @@ function Skyline() {
 const STAGE_ZOOM_MIN = 0.75;
 const STAGE_ZOOM_MAX = 1.5;
 const STAGE_ZOOM_STEP = 0.125;
-const PLAYER_MOVE_STEP_PX = 18;
-const PLAYER_MOVE_FAST_STEP_PX = 30;
+const PLAYER_MOVE_SPEED_PX = 170;
+const PLAYER_MOVE_FAST_SPEED_PX = 270;
 const PLAYER_STAGE_BOUNDS = {
-  minX: 4,
+  minX: 3,
   maxX: 96,
-  minY: 10,
-  maxY: 90,
+  minY: 8,
+  maxY: 91,
 };
-const AGENT_TRAVEL_DURATION_MS = 1900;
+const AGENT_TRAVEL_MIN_SEGMENT_MS = 90;
 const PRESENCE_POSITION_THROTTLE_MS = 100;
-const QUEST_MARKER_POSITION: StageActorPosition = { left: "61.5%", top: "13.5%" };
+const QUEST_MARKER_POSITION: StageActorPosition = { left: "90.4%", top: "75.8%" };
 const QUEST_INTERACTION_RADIUS_PCT = 6.5;
 const ACTOR_INTERACTION_RADIUS_PCT = 7;
+const CAMERA_FOLLOW_SMOOTHING = 0.18;
 
 function clampStageZoom(value: number) {
   return Math.min(STAGE_ZOOM_MAX, Math.max(STAGE_ZOOM_MIN, Number(value.toFixed(3))));
@@ -4038,18 +4654,202 @@ function parseStagePct(value: string) {
   return Number.isFinite(parsed) ? parsed : 50;
 }
 
-function moveStagePosition(
+interface WallSegment {
+  axis: "h" | "v";
+  fixed: number;
+  start: number;
+  end: number;
+}
+
+const WALL_DOOR_HALF_PCT = 5;
+const PLAYER_WALL_PADDING_PCT = 0.6;
+
+function buildStageWalls(rooms: StageRoomSpec[]): WallSegment[] {
+  const walls: WallSegment[] = [];
+  for (const room of rooms) {
+    const left = parseFloat(room.left);
+    const top = parseFloat(room.top);
+    const w = parseFloat(room.width);
+    const h = parseFloat(room.height);
+    if (!Number.isFinite(left) || !Number.isFinite(top) || !Number.isFinite(w) || !Number.isFinite(h)) continue;
+    const right = left + w;
+    const bottom = top + h;
+    pushWallSide(walls, "h", top, left, right, w, room.doorSide === "top" ? room.doorAt : null);
+    pushWallSide(walls, "h", bottom, left, right, w, room.doorSide === "bottom" ? room.doorAt : null);
+    pushWallSide(walls, "v", left, top, bottom, h, room.doorSide === "left" ? room.doorAt : null);
+    pushWallSide(walls, "v", right, top, bottom, h, room.doorSide === "right" ? room.doorAt : null);
+  }
+  return walls;
+}
+
+function pushWallSide(
+  walls: WallSegment[],
+  axis: "h" | "v",
+  fixed: number,
+  start: number,
+  end: number,
+  span: number,
+  doorAt: number | null,
+) {
+  if (doorAt == null) {
+    walls.push({ axis, fixed, start, end });
+    return;
+  }
+  const doorMid = start + span * doorAt;
+  const half = (span * WALL_DOOR_HALF_PCT) / 100;
+  const a = { axis, fixed, start, end: doorMid - half };
+  const b = { axis, fixed, start: doorMid + half, end };
+  if (a.end > a.start) walls.push(a);
+  if (b.end > b.start) walls.push(b);
+}
+
+function findWallBlocking(walls: WallSegment[], axis: "h" | "v", from: number, to: number, perp: number): WallSegment | null {
+  if (from === to) return null;
+  for (const wall of walls) {
+    if (axis === "v") {
+      if (wall.axis !== "v") continue;
+      if (perp < wall.start || perp > wall.end) continue;
+      if ((from < wall.fixed && to >= wall.fixed) || (from > wall.fixed && to <= wall.fixed)) {
+        return wall;
+      }
+    } else {
+      if (wall.axis !== "h") continue;
+      if (perp < wall.start || perp > wall.end) continue;
+      if ((from < wall.fixed && to >= wall.fixed) || (from > wall.fixed && to <= wall.fixed)) {
+        return wall;
+      }
+    }
+  }
+  return null;
+}
+
+function resolveAxisMove(walls: WallSegment[], axis: "h" | "v", from: number, to: number, perp: number): number {
+  const wall = findWallBlocking(walls, axis, from, to, perp);
+  if (!wall) return to;
+  if (from < wall.fixed) {
+    const limit = wall.fixed - PLAYER_WALL_PADDING_PCT;
+    return Math.max(from, Math.min(to, limit));
+  }
+  const limit = wall.fixed + PLAYER_WALL_PADDING_PCT;
+  return Math.min(from, Math.max(to, limit));
+}
+
+function resolveStageMove(
   position: StageActorPosition,
   deltaX: number,
   deltaY: number,
+  walls: WallSegment[],
 ): StageActorPosition {
+  const fromX = parseStagePct(position.left);
+  const fromY = parseStagePct(position.top);
+  const targetX = clampMiniMapValue(fromX + deltaX, PLAYER_STAGE_BOUNDS.minX, PLAYER_STAGE_BOUNDS.maxX);
+  const targetY = clampMiniMapValue(fromY + deltaY, PLAYER_STAGE_BOUNDS.minY, PLAYER_STAGE_BOUNDS.maxY);
+  const resolvedX = resolveAxisMove(walls, "v", fromX, targetX, fromY);
+  const resolvedY = resolveAxisMove(walls, "h", fromY, targetY, resolvedX);
+  return { left: pct(resolvedX), top: pct(resolvedY) };
+}
+
+const AGENT_DOOR_OUT_OFFSET_PCT = 1.6;
+
+function findRoomContaining(x: number, y: number, rooms: StageRoomSpec[]): StageRoomSpec | null {
+  for (const room of rooms) {
+    const left = parseFloat(room.left);
+    const top = parseFloat(room.top);
+    const w = parseFloat(room.width);
+    const h = parseFloat(room.height);
+    if (!Number.isFinite(left) || !Number.isFinite(top) || !Number.isFinite(w) || !Number.isFinite(h)) continue;
+    if (x >= left && x <= left + w && y >= top && y <= top + h) return room;
+  }
+  return null;
+}
+
+function getRoomDoorPoint(room: StageRoomSpec): {
+  inside: { x: number; y: number };
+  outside: { x: number; y: number };
+} {
+  const left = parseFloat(room.left);
+  const top = parseFloat(room.top);
+  const w = parseFloat(room.width);
+  const h = parseFloat(room.height);
+  const right = left + w;
+  const bottom = top + h;
+  const offset = AGENT_DOOR_OUT_OFFSET_PCT;
+  if (room.doorSide === "top") {
+    const x = left + w * room.doorAt;
+    return { inside: { x, y: top }, outside: { x, y: top - offset } };
+  }
+  if (room.doorSide === "bottom") {
+    const x = left + w * room.doorAt;
+    return { inside: { x, y: bottom }, outside: { x, y: bottom + offset } };
+  }
+  if (room.doorSide === "left") {
+    const y = top + h * room.doorAt;
+    return { inside: { x: left, y }, outside: { x: left - offset, y } };
+  }
+  const y = top + h * room.doorAt;
+  return { inside: { x: right, y }, outside: { x: right + offset, y } };
+}
+
+function getHallwayCorner(
+  srcOut: { x: number; y: number },
+  srcSide: StageRoomSpec["doorSide"],
+  dstOut: { x: number; y: number },
+  dstSide: StageRoomSpec["doorSide"],
+): { x: number; y: number } | null {
+  const srcHoriz = srcSide === "left" || srcSide === "right";
+  const dstHoriz = dstSide === "left" || dstSide === "right";
+  if (Math.abs(srcOut.x - dstOut.x) < 0.05 || Math.abs(srcOut.y - dstOut.y) < 0.05) return null;
+  if (srcHoriz && !dstHoriz) return { x: srcOut.x, y: dstOut.y };
+  if (!srcHoriz && dstHoriz) return { x: dstOut.x, y: srcOut.y };
+  if (srcHoriz) return { x: srcOut.x, y: dstOut.y };
+  return { x: dstOut.x, y: srcOut.y };
+}
+
+function computeAgentPath(
+  from: StageActorPosition,
+  to: StageActorPosition,
+  rooms: StageRoomSpec[],
+): { x: number; y: number }[] {
+  const fx = parseStagePct(from.left);
+  const fy = parseStagePct(from.top);
+  const tx = parseStagePct(to.left);
+  const ty = parseStagePct(to.top);
+  const fromRoom = findRoomContaining(fx, fy, rooms);
+  const toRoom = findRoomContaining(tx, ty, rooms);
+  if (!fromRoom || !toRoom || fromRoom.label === toRoom.label) {
+    return [{ x: tx, y: ty }];
+  }
+  const srcDoor = getRoomDoorPoint(fromRoom);
+  const dstDoor = getRoomDoorPoint(toRoom);
+  const corner = getHallwayCorner(srcDoor.outside, fromRoom.doorSide, dstDoor.outside, toRoom.doorSide);
+  const waypoints: { x: number; y: number }[] = [
+    srcDoor.inside,
+    srcDoor.outside,
+  ];
+  if (corner) waypoints.push(corner);
+  waypoints.push(dstDoor.outside);
+  waypoints.push(dstDoor.inside);
+  waypoints.push({ x: tx, y: ty });
+  return waypoints;
+}
+
+function getStagePanForPosition(
+  position: StageActorPosition,
+  stageSize: StageSize,
+  zoom: number,
+): StagePan {
+  const playerLeftPct = parseStagePct(position.left);
+  const playerTopPct = parseStagePct(position.top);
   return {
-    left: pct(
-      clampMiniMapValue(parseStagePct(position.left) + deltaX, PLAYER_STAGE_BOUNDS.minX, PLAYER_STAGE_BOUNDS.maxX),
-    ),
-    top: pct(
-      clampMiniMapValue(parseStagePct(position.top) + deltaY, PLAYER_STAGE_BOUNDS.minY, PLAYER_STAGE_BOUNDS.maxY),
-    ),
+    x: -((playerLeftPct - 50) / 100) * stageSize.width * zoom,
+    y: -((playerTopPct - 50) / 100) * stageSize.height * zoom,
+  };
+}
+
+function smoothStagePan(current: StagePan, target: StagePan, amount: number): StagePan {
+  return {
+    x: current.x + (target.x - current.x) * amount,
+    y: current.y + (target.y - current.y) * amount,
   };
 }
 
@@ -4101,6 +4901,10 @@ function getPlayerMoveDirection(key: string): { x: number; y: number } | null {
   }
 }
 
+function isPlayerMoveKey(key: string) {
+  return getPlayerMoveDirection(key) != null;
+}
+
 function shouldIgnoreStageMovementKey(target: EventTarget | null) {
   if (document.querySelector('[role="dialog"]')) return true;
   if (!(target instanceof HTMLElement)) return false;
@@ -4114,16 +4918,9 @@ function shouldIgnoreStageMovementKey(target: EventTarget | null) {
 }
 
 function buildWorkspacePresenceUrl(workspaceId: number, token: string) {
-  if (typeof window === "undefined") return null;
-  try {
-    const baseUrl = API_BASE ? new URL(API_BASE, window.location.origin).origin : window.location.origin;
-    const url = new URL(`/ws/workspaces/${workspaceId}/presence`, baseUrl);
-    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    url.searchParams.set("token", token);
-    return url.toString();
-  } catch {
-    return null;
-  }
+  const base = API_BASE.endsWith("/") ? API_BASE.slice(0, -1) : API_BASE;
+  const query = new URLSearchParams({ token });
+  return `${base}/api/v1/workspaces/${workspaceId}/presence/stream?${query.toString()}`;
 }
 
 function parsePresenceMessage(raw: string): Record<string, unknown> | null {
@@ -4172,7 +4969,7 @@ function useWorkspacePresence(
   workspaceId: number,
   memberId: number | undefined,
 ): WorkspacePresenceState {
-  const socketRef = useRef<WebSocket | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
   const pendingPositionRef = useRef<{ position: StageActorPosition; status: PresenceStatus } | null>(null);
   const lastPositionSentAtRef = useRef(0);
   const positionTimerRef = useRef<number | null>(null);
@@ -4181,18 +4978,19 @@ function useWorkspacePresence(
 
   const flushPosition = useCallback(() => {
     const pending = pendingPositionRef.current;
-    const socket = socketRef.current;
-    if (!pending || socket?.readyState !== WebSocket.OPEN) return;
-    socket.send(
-      JSON.stringify({
-        type: "presence.position",
+    if (!pending || !memberId) return;
+    pendingPositionRef.current = null;
+    lastPositionSentAtRef.current = Date.now();
+    void apiFetch(`/api/v1/workspaces/${workspaceId}/presence/me/position`, {
+      method: "PATCH",
+      body: JSON.stringify({
         position: pending.position,
         status: pending.status,
       }),
-    );
-    pendingPositionRef.current = null;
-    lastPositionSentAtRef.current = Date.now();
-  }, []);
+    }).catch(() => {
+      // Presence is best-effort; the next movement tick will send a fresh position.
+    });
+  }, [memberId, workspaceId]);
 
   const sendPosition = useCallback(
     (position: StageActorPosition, status: PresenceStatus = "walking") => {
@@ -4226,11 +5024,10 @@ function useWorkspacePresence(
       return;
     }
 
-    let closedByEffect = false;
-    const socket = new WebSocket(url);
-    socketRef.current = socket;
+    const source = new EventSource(url);
+    eventSourceRef.current = source;
 
-    socket.onmessage = (event) => {
+    source.onmessage = (event) => {
       const message = parsePresenceMessage(event.data);
       if (!message) return;
 
@@ -4292,18 +5089,15 @@ function useWorkspacePresence(
       }
     };
 
-    socket.onclose = () => {
-      if (socketRef.current === socket) socketRef.current = null;
-      if (!closedByEffect) {
-        setOnlineMemberIds(null);
-        setRemoteMemberPositions({});
+    source.onerror = () => {
+      if (source.readyState === EventSource.CLOSED && eventSourceRef.current === source) {
+        eventSourceRef.current = null;
       }
     };
 
     return () => {
-      closedByEffect = true;
-      if (socketRef.current === socket) socketRef.current = null;
-      socket.close();
+      if (eventSourceRef.current === source) eventSourceRef.current = null;
+      source.close();
     };
   }, [memberId, workspaceId]);
 
@@ -4320,16 +5114,37 @@ function useWorkspacePresence(
 
 const AGENT_DESK_COL_CENTERS = [16, 33, 50, 67];
 const AGENT_DESK_W_PCT = 14;
-const ENGINEERING_LEFT_PCT = 5.5;
-const ENGINEERING_TOP_PCT = 8.5;
-const ENGINEERING_WIDTH_PCT = 30.5;
+const STAGE_WORLD_WIDTH = 1800;
+const STAGE_WORLD_MIN_HEIGHT = 950;
+const ENGINEERING_X = 40;
+const ENGINEERING_Y = 90;
+const ENGINEERING_W = 620;
+const HUDDLE_X = 710;
+const HUDDLE_Y = 90;
+const HUDDLE_W = 390;
+const HUDDLE_H = 260;
+const LOWER_ZONE_GAP = 100;
+const LOUNGE_X = 40;
+const LOUNGE_W = 620;
+const LOUNGE_H = 320;
+const LIBRARY_X = 710;
+const LIBRARY_W = 1040;
+const LIBRARY_H = 430;
 
 function getEngineeringRows(agentCount: number): number {
   return Math.max(2, Math.ceil(Math.max(agentCount, 1) / AGENT_DESK_COL_CENTERS.length));
 }
 
-function getEngineeringHeightPct(rows: number): number {
-  return Math.min(78, 37 + Math.max(0, rows - 2) * 12);
+function getEngineeringHeightPx(rows: number): number {
+  return 320 + Math.max(0, rows - 2) * 130;
+}
+
+function getStageWorldSize(engineeringRows: number): StageSize {
+  const lowerTop = ENGINEERING_Y + getEngineeringHeightPx(engineeringRows) + LOWER_ZONE_GAP;
+  return {
+    width: STAGE_WORLD_WIDTH,
+    height: Math.max(STAGE_WORLD_MIN_HEIGHT, lowerTop + Math.max(LOUNGE_H, LIBRARY_H) + 90),
+  };
 }
 
 function getDeskRowCenters(rows: number): number[] {
@@ -4346,36 +5161,65 @@ function getDeskHeightPct(rows: number): number {
   return Math.max(8, Math.min(15, 60 / rows));
 }
 
-function getStageRooms(engineeringRows: number): StageRoomSpec[] {
-  const engineeringHeight = getEngineeringHeightPct(engineeringRows);
-  const huddleLeft = ENGINEERING_LEFT_PCT + ENGINEERING_WIDTH_PCT + 2.2;
+function pxToStagePct(value: number, total: number): string {
+  return pct((value / total) * 100);
+}
+
+function getStageRooms(
+  engineeringRows: number,
+  worldSize: StageSize,
+  agentCount: number,
+): StageRoomSpec[] {
+  const engineeringHeight = getEngineeringHeightPx(engineeringRows);
+  const lowerTop = ENGINEERING_Y + engineeringHeight + LOWER_ZONE_GAP;
   return [
     {
       label: "♦ ENGINEERING",
-      left: pct(ENGINEERING_LEFT_PCT),
-      top: pct(ENGINEERING_TOP_PCT),
-      width: pct(ENGINEERING_WIDTH_PCT),
-      height: pct(engineeringHeight),
+      sub: `${agentCount} agents · ${engineeringRows} rows`,
+      left: pxToStagePct(ENGINEERING_X, worldSize.width),
+      top: pxToStagePct(ENGINEERING_Y, worldSize.height),
+      width: pxToStagePct(ENGINEERING_W, worldSize.width),
+      height: pxToStagePct(engineeringHeight, worldSize.height),
       color: t4.pink,
       variant: "engineering",
+      doorSide: "right",
+      doorAt: 0.72,
     },
     {
       label: "♦ HUDDLE",
-      left: pct(huddleLeft),
-      top: pct(8.5),
-      width: pct(21.6),
-      height: pct(24.5),
+      sub: "meeting in progress",
+      left: pxToStagePct(HUDDLE_X, worldSize.width),
+      top: pxToStagePct(HUDDLE_Y, worldSize.height),
+      width: pxToStagePct(HUDDLE_W, worldSize.width),
+      height: pxToStagePct(HUDDLE_H, worldSize.height),
       color: t4.mp,
       variant: "huddle",
+      doorSide: "bottom",
+      doorAt: 0.5,
     },
     {
-      label: "♦ LOUNGE · REST ZONE",
-      left: pct(27),
-      top: pct(Math.max(38, ENGINEERING_TOP_PCT + engineeringHeight + 2)),
-      width: pct(32.8),
-      height: pct(33.6),
+      label: "♦ LOUNGE",
+      sub: "rest zone",
+      left: pxToStagePct(LOUNGE_X, worldSize.width),
+      top: pxToStagePct(lowerTop, worldSize.height),
+      width: pxToStagePct(LOUNGE_W, worldSize.width),
+      height: pxToStagePct(LOUNGE_H, worldSize.height),
       color: t4.ok,
       variant: "rest",
+      doorSide: "top",
+      doorAt: 0.44,
+    },
+    {
+      label: "♦ LIBRARY",
+      sub: "quiet zone · /docs",
+      left: pxToStagePct(LIBRARY_X, worldSize.width),
+      top: pxToStagePct(lowerTop, worldSize.height),
+      width: pxToStagePct(LIBRARY_W, worldSize.width),
+      height: pxToStagePct(LIBRARY_H, worldSize.height),
+      color: t4.xp,
+      variant: "library",
+      doorSide: "left",
+      doorAt: 0.25,
     },
   ];
 }
@@ -4430,14 +5274,14 @@ function getStageMiniMapRooms(rooms: StageRoomSpec[]): MiniMapRoom[] {
 }
 
 const MEMBER_POSITIONS: StageActorPosition[] = [
-  { left: "49.2%", top: "27%" },
-  { left: "55.6%", top: "33%" },
-  { left: "12.3%", top: "62.5%" },
-  { left: "33.4%", top: "66.5%" },
-  { left: "51.8%", top: "66.5%" },
-  { left: "44.0%", top: "62.5%" },
-  { left: "60.5%", top: "27%" },
-  { left: "16.8%", top: "70%" },
+  { left: "36.8%", top: "54%" },
+  { left: "45.1%", top: "23.5%" },
+  { left: "54.2%", top: "31.2%" },
+  { left: "14.6%", top: "68.5%" },
+  { left: "20.8%", top: "68.5%" },
+  { left: "58.8%", top: "59.5%" },
+  { left: "72.0%", top: "59.5%" },
+  { left: "8.6%", top: "80%" },
 ];
 
 const AGENT_LOUNGE_POSITIONS = [
@@ -4496,9 +5340,7 @@ function SettingsSelectModal({
           onClick={onOpenClaw}
         />
       </Modal.Body>
-      <Modal.Footer>
-        <Button type="button" onClick={onClose}>닫기</Button>
-      </Modal.Footer>
+      <Modal.Footer />
     </Modal>
   );
 }
@@ -4619,7 +5461,7 @@ function TaskDashboardModal({
   }, [open, workspaceId]);
 
   useEffect(() => {
-    if (!open) setSelectedTask(null);
+    if (!open) queueMicrotask(() => setSelectedTask(null));
   }, [open]);
 
   return (
@@ -4676,7 +5518,6 @@ function TaskDashboardModal({
         >
           <GlyphText glyph="◇">3초마다 자동 갱신</GlyphText>
         </span>
-        <Button type="button" variant="ghost" onClick={onClose}>닫기</Button>
       </Modal.Footer>
     </Modal>
   );
@@ -5333,9 +6174,6 @@ function AgentHireModal({
         </Modal.Body>
 
         <Modal.Footer>
-          <Button type="button" variant="ghost" onClick={onClose} disabled={submitting}>
-            닫기
-          </Button>
           <Button type="submit" icon={<UserPlus />} loading={submitting}>
             고용
           </Button>
@@ -5451,9 +6289,6 @@ function SlackIntegrationModal({
         <Button type="button" variant="ghost" icon={<ArrowLeft />} onClick={onBack} disabled={submitting}>
           채널 설정
         </Button>
-        <Button type="button" variant="ghost" onClick={onClose} disabled={submitting}>
-          닫기
-        </Button>
       </Modal.Footer>
     </Modal>
   );
@@ -5494,7 +6329,6 @@ function DiscordIntegrationModal({
         <Button type="button" variant="ghost" icon={<ArrowLeft />} onClick={onBack}>
           채널 설정
         </Button>
-        <Button type="button" onClick={onClose}>닫기</Button>
       </Modal.Footer>
     </Modal>
   );
@@ -5609,9 +6443,6 @@ function GithubIntegrationModal({
           <Button type="button" variant="ghost" icon={<ArrowLeft />} onClick={onBack} disabled={submitting}>
             채널 설정
           </Button>
-          <Button type="button" variant="ghost" onClick={onClose} disabled={submitting}>
-            닫기
-          </Button>
           {!saved && (
             <Button type="submit" icon={<KeyRound />} loading={submitting} disabled={!isAdmin}>
               연결 저장
@@ -5723,9 +6554,6 @@ function OpenClawIntegrationModal({
         <Modal.Footer>
           <Button type="button" variant="ghost" icon={<ArrowLeft />} onClick={onBack} disabled={busy}>
             채널 설정
-          </Button>
-          <Button type="button" variant="ghost" onClick={onClose} disabled={busy}>
-            닫기
           </Button>
           {!saved?.bound && (
             <Button type="submit" icon={<KeyRound />} loading={submitting} disabled={testing}>
@@ -6324,7 +7152,7 @@ function getActorSpeechBubble(actor: OfficeActor) {
       color: t4.xp,
     };
   }
-  if (status && ACTIVE_AGENT_TASK_STATUSES.includes(status)) {
+  if (status === "IN_PROGRESS") {
     return {
       label: "진행중",
       text: "",
@@ -6666,6 +7494,7 @@ function OrchestrationPlanModal({
           ))}
         </div>
       </Modal.Body>
+      <Modal.Footer />
     </Modal>
   );
 }
@@ -6760,6 +7589,7 @@ function ArtifactFileModal({
           </pre>
         )}
       </Modal.Body>
+      <Modal.Footer />
     </Modal>
   );
 }
@@ -6867,6 +7697,7 @@ function WorkspaceFilesModal({
           <ArtifactTreeNodes nodes={children} depth={0} onOpenFile={onOpenFile} />
         </div>
       </Modal.Body>
+      <Modal.Footer />
     </Modal>
   );
 }

@@ -191,7 +191,7 @@ function AuthPageInner() {
             letterSpacing: 3,
           }}
         >
-          [ ESC BACK ] © CLAW STUDIO 2026
+          [ ESC BACK ] © TEAM IoT 2026
         </div>
       </div>
 

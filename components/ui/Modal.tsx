@@ -112,10 +112,10 @@ function ModalBody({ children, className = "" }: { children: ReactNode; classNam
   );
 }
 
-function ModalFooter({ children, className = "" }: { children: ReactNode; className?: string }) {
+function ModalFooter({ children, className = "" }: { children?: ReactNode; className?: string }) {
   return (
     <div
-      className={`px-6 py-4 flex items-center justify-end gap-3 flex-shrink-0 ${className}`}
+      className={`px-6 py-4 flex items-center justify-end gap-3 flex-shrink-0 min-h-[68px] ${className}`}
       style={{
         borderTop: "1px solid var(--t4-line)",
         background: "rgba(0,0,0,0.4)",

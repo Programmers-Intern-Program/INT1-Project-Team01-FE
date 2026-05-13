@@ -239,7 +239,7 @@ export default function LandingPage() {
             letterSpacing: 3,
           }}
         >
-          [ ↑↓ SELECT ] [ ↵ CONFIRM ] © CLAW STUDIO 2026
+          [ ↑↓ SELECT ] [ ↵ CONFIRM ] © TEAM IoT 2026
         </div>
       </div>
 

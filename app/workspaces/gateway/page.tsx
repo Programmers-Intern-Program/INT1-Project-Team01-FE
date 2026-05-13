@@ -160,7 +160,7 @@ export default function GatewayPage() {
               marginTop: 8,
             }}
           >
-            Link an OpenClaw gateway so workplaces can summon agents through it.
+            워크스페이스에서 에이전트를 소환할 수 있도록 OpenClaw 게이트웨이를 연결해 주세요.
           </p>
         </div>
 
@@ -177,7 +177,7 @@ export default function GatewayPage() {
                     textAlign: "center",
                   }}
                 >
-                  <GlyphText glyph="◇">no gateway linked yet</GlyphText>
+                  <GlyphText glyph="◇">아직 연결된 게이트웨이가 없습니다</GlyphText>
                 </p>
               ) : (
                 <div className="grid gap-2">
@@ -299,7 +299,7 @@ export default function GatewayPage() {
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
                   maxLength={DISPLAY_NAME_MAX}
-                  placeholder="e.g. local openclaw gateway"
+                  placeholder="예: 로컬 OpenClaw 게이트웨이"
                   disabled={submitting}
                   autoFocus
                 />
@@ -324,7 +324,7 @@ export default function GatewayPage() {
                   type="password"
                   value={token}
                   onChange={(e) => setToken(e.target.value)}
-                  placeholder="openclaw gateway token"
+                  placeholder="OpenClaw 게이트웨이 토큰"
                   disabled={submitting}
                 />
               </Field>
@@ -369,9 +369,9 @@ export default function GatewayPage() {
         </div>
 
         <div className="grid gap-3 md:grid-cols-3">
-          <InfoCard step="01" title="REGISTER" description="Type a label, gateway URL, and token to add a station." />
-          <InfoCard step="02" title="VERIFY" description="The sidebar lists every linked gateway with its status." />
-          <InfoCard step="03" title="BIND" description="Workspace-level binding ships when the API lands." />
+          <InfoCard step="01" title="REGISTER" description="라벨, 게이트웨이 URL, 토큰을 입력해 새 스테이션을 추가합니다." />
+          <InfoCard step="02" title="VERIFY" description="사이드바에서 연결된 모든 게이트웨이의 상태를 확인할 수 있습니다." />
+          <InfoCard step="03" title="BIND" description="워크스페이스 단위 바인딩은 API 연동 이후 제공될 예정입니다." />
         </div>
       </div>
     </T4Screen>
