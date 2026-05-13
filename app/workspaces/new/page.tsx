@@ -119,7 +119,7 @@ export default function NewWorkspacePage() {
               marginTop: 8,
             }}
           >
-            Name your workspace and write a short briefing. Founder gets ADMIN role.
+            워크스페이스 이름과 간단한 소개를 적어주세요. 생성자에게는 ADMIN 권한이 부여됩니다.
           </p>
         </div>
 
@@ -134,7 +134,7 @@ export default function NewWorkspacePage() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 maxLength={NAME_MAX}
-                placeholder="e.g. backend engineering guild"
+                placeholder="예: 백엔드 엔지니어링 길드"
                 autoFocus
                 disabled={submitting}
               />
@@ -149,7 +149,7 @@ export default function NewWorkspacePage() {
                 onChange={(e) => setDescription(e.target.value)}
                 maxLength={DESCRIPTION_MAX}
                 rows={4}
-                placeholder="describe the workspace's mission, in-progress quests, etc."
+                placeholder="워크스페이스의 미션, 진행 중인 작업 등을 설명해 주세요."
                 disabled={submitting}
               />
             </Field>
