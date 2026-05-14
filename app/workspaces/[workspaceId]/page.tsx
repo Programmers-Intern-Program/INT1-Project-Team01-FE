@@ -336,19 +336,22 @@ export default function WorkspaceOfficePage({
   const [slackDeleting, setSlackDeleting] = useState(false);
   const [slackError, setSlackError] = useState("");
   const [slackNotice, setSlackNotice] = useState("");
-  const [savedSlack, setSavedSlack] = useState<SlackIntegration | null>(() =>
-    readStoredIntegration<SlackIntegration>(id, "slack"),
-  );
+  const [savedSlackIntegrations, setSavedSlackIntegrations] = useState<SlackIntegration[]>(() => {
+    const stored = readStoredIntegration<SlackIntegration>(id, "slack");
+    return stored ? [stored] : [];
+  });
 
   const [githubDisplayName, setGithubDisplayName] = useState("");
   const [githubToken, setGithubToken] = useState("");
+  const [selectedGithubId, setSelectedGithubId] = useState<number | null>(null);
   const [githubBusy, setGithubBusy] = useState(false);
   const [githubDeleting, setGithubDeleting] = useState(false);
   const [githubError, setGithubError] = useState("");
   const [githubNotice, setGithubNotice] = useState("");
-  const [savedGithub, setSavedGithub] = useState<GithubCredentialInfo | null>(() =>
-    readStoredIntegration<GithubCredentialInfo>(id, "github"),
-  );
+  const [savedGithubCredentials, setSavedGithubCredentials] = useState<GithubCredentialInfo[]>(() => {
+    const stored = readStoredIntegration<GithubCredentialInfo>(id, "github");
+    return stored ? [stored] : [];
+  });
 
   const [gatewayUrl, setGatewayUrl] = useState("");
   const [gatewayToken, setGatewayToken] = useState("");
@@ -356,9 +359,10 @@ export default function WorkspaceOfficePage({
   const [gatewayTesting, setGatewayTesting] = useState(false);
   const [gatewayError, setGatewayError] = useState("");
   const [gatewayNotice, setGatewayNotice] = useState("");
-  const [savedGateway, setSavedGateway] = useState<WorkspaceGatewayStatus | null>(() =>
-    readStoredGatewayStatus(id),
-  );
+  const [savedGateways, setSavedGateways] = useState<WorkspaceGatewayStatus[]>(() => {
+    const stored = readStoredGatewayStatus(id);
+    return stored ? [stored] : [];
+  });
 
   const [hiredAgents, setHiredAgents] = useState<HiredAgent[]>([]);
   const [agentName, setAgentName] = useState("");
@@ -614,10 +618,11 @@ export default function WorkspaceOfficePage({
     listSlackIntegrations(id)
       .then((integrations) => {
         if (cancelled) return;
-        const next = integrations[0] ?? null;
-        setSavedSlack(next);
-        if (next) {
-          writeStoredIntegration(id, "slack", next);
+        setSavedSlackIntegrations(integrations);
+        if (integrations[0]) {
+          writeStoredIntegration(id, "slack", integrations[0]);
+        } else {
+          deleteStoredIntegration(id, "slack");
         }
       })
       .catch((err) => {
@@ -644,11 +649,16 @@ export default function WorkspaceOfficePage({
     listGithubCredentials(id)
       .then((credentials) => {
         if (cancelled) return;
+        setSavedGithubCredentials(credentials);
         const next = credentials[0] ?? null;
-        setSavedGithub(next);
         if (next) {
+          setSelectedGithubId(next.id);
           setGithubDisplayName(next.displayName);
           writeStoredIntegration(id, "github", next);
+        } else {
+          setSelectedGithubId(null);
+          setGithubDisplayName("");
+          deleteStoredIntegration(id, "github");
         }
       })
       .catch((err) => {
@@ -676,7 +686,7 @@ export default function WorkspaceOfficePage({
       .then((status) => {
         if (cancelled) return;
         const next = normalizeGatewayStatus(status);
-        setSavedGateway(next);
+        setSavedGateways(next.bound ? [next] : []);
         if (next.bound) {
           writeStoredIntegration(id, "openclaw", next);
           if (next.gatewayUrl) setGatewayUrl(next.gatewayUrl);
@@ -688,7 +698,7 @@ export default function WorkspaceOfficePage({
         if (cancelled) return;
         const apiErr = err as ApiError;
         const stored = readStoredGatewayStatus(id);
-        setSavedGateway(stored);
+        setSavedGateways(stored ? [stored] : []);
         setGatewayError(apiErr?.message ?? "OpenClaw Gateway 조회에 실패했습니다.");
       })
       .finally(() => {
@@ -833,6 +843,9 @@ export default function WorkspaceOfficePage({
     }
   }
 
+  const selectedGithub =
+    savedGithubCredentials.find((credential) => credential.id === selectedGithubId) ?? null;
+
   async function handleSlackInstall() {
     if (!isAdmin) {
       setSlackError("Slack 연동은 워크스페이스 ADMIN만 시작할 수 있습니다.");
@@ -856,15 +869,18 @@ export default function WorkspaceOfficePage({
     }
   }
 
-  async function handleSlackDelete() {
-    if (!savedSlack) return;
+  async function handleSlackDelete(integrationId: number) {
     setSlackDeleting(true);
     setSlackError("");
     setSlackNotice("");
     try {
-      await deleteSlackIntegration(id, savedSlack.id);
-      deleteStoredIntegration(id, "slack");
-      setSavedSlack(null);
+      await deleteSlackIntegration(id, integrationId);
+      const nextIntegrations = savedSlackIntegrations.filter(
+        (integration) => integration.id !== integrationId,
+      );
+      setSavedSlackIntegrations(nextIntegrations);
+      if (nextIntegrations[0]) writeStoredIntegration(id, "slack", nextIntegrations[0]);
+      else deleteStoredIntegration(id, "slack");
       setSlackNotice("Slack 연동 정보를 삭제했습니다.");
     } catch (err) {
       const apiErr = err as ApiError;
@@ -956,7 +972,7 @@ export default function WorkspaceOfficePage({
 
   async function handleGithubSubmit(e: FormEvent) {
     e.preventDefault();
-    const editing = Boolean(savedGithub);
+    const editing = Boolean(selectedGithub);
     if (!githubDisplayName.trim() || (!editing && !githubToken.trim())) {
       setGithubError(
         editing
@@ -969,8 +985,8 @@ export default function WorkspaceOfficePage({
     setGithubError("");
     setGithubNotice("");
     try {
-      const res = editing && savedGithub
-        ? await updateGithubCredential(id, savedGithub.id, {
+      const res = editing && selectedGithub
+        ? await updateGithubCredential(id, selectedGithub.id, {
             displayName: githubDisplayName.trim(),
             ...(githubToken.trim() ? { token: githubToken.trim() } : {}),
           })
@@ -978,7 +994,14 @@ export default function WorkspaceOfficePage({
             displayName: githubDisplayName.trim(),
             token: githubToken.trim(),
           });
-      setSavedGithub(res);
+      setSavedGithubCredentials((prev) => {
+        const exists = prev.some((credential) => credential.id === res.id);
+        return exists
+          ? prev.map((credential) => (credential.id === res.id ? res : credential))
+          : [res, ...prev];
+      });
+      setSelectedGithubId(res.id);
+      setGithubDisplayName(res.displayName);
       writeStoredIntegration(id, "github", res);
       setGithubNotice(editing ? "GitHub 연결 정보를 수정했습니다." : "GitHub 연결 정보를 저장했습니다.");
       setGithubToken("");
@@ -990,15 +1013,40 @@ export default function WorkspaceOfficePage({
     }
   }
 
-  async function handleGithubDelete() {
-    if (!savedGithub) return;
+  function handleGithubCreateMode() {
+    setSelectedGithubId(null);
+    setGithubDisplayName("");
+    setGithubToken("");
+    setGithubError("");
+    setGithubNotice("");
+  }
+
+  function handleGithubEdit(credential: GithubCredentialInfo) {
+    setSelectedGithubId(credential.id);
+    setGithubDisplayName(credential.displayName);
+    setGithubToken("");
+    setGithubError("");
+    setGithubNotice("");
+  }
+
+  async function handleGithubDelete(credentialId: number) {
     setGithubDeleting(true);
     setGithubError("");
     setGithubNotice("");
     try {
-      await deleteGithubCredential(id, savedGithub.id);
-      deleteStoredIntegration(id, "github");
-      setSavedGithub(null);
+      await deleteGithubCredential(id, credentialId);
+      const nextCredentials = savedGithubCredentials.filter(
+        (credential) => credential.id !== credentialId,
+      );
+      setSavedGithubCredentials(nextCredentials);
+      if (selectedGithubId === credentialId) {
+        const nextSelected = nextCredentials[0] ?? null;
+        setSelectedGithubId(nextSelected?.id ?? null);
+        setGithubDisplayName(nextSelected?.displayName ?? "");
+        setGithubToken("");
+      }
+      if (nextCredentials[0]) writeStoredIntegration(id, "github", nextCredentials[0]);
+      else deleteStoredIntegration(id, "github");
       setGithubNotice("GitHub 연결 정보를 삭제했습니다.");
     } catch (err) {
       const apiErr = err as ApiError;
@@ -1030,7 +1078,7 @@ export default function WorkspaceOfficePage({
       } catch {
         // Keep the binding response visible even if the follow-up status call fails.
       }
-      setSavedGateway(next);
+      setSavedGateways(next.bound ? [next] : []);
       writeStoredIntegration(id, "openclaw", next);
       setGatewayNotice("OpenClaw Gateway 정보를 저장했습니다.");
       setGatewayToken("");
@@ -1411,7 +1459,7 @@ export default function WorkspaceOfficePage({
           setSettingsOpen(true);
         }}
         isAdmin={isAdmin}
-        saved={savedSlack}
+        integrations={savedSlackIntegrations}
         error={slackError}
         notice={slackNotice}
         submitting={slackBusy}
@@ -1439,12 +1487,15 @@ export default function WorkspaceOfficePage({
         onDisplayNameChange={setGithubDisplayName}
         token={githubToken}
         onTokenChange={setGithubToken}
-        saved={savedGithub}
+        selected={selectedGithub}
+        credentials={savedGithubCredentials}
         error={githubError}
         notice={githubNotice}
         submitting={githubBusy}
         deleting={githubDeleting}
         onSubmit={handleGithubSubmit}
+        onCreateMode={handleGithubCreateMode}
+        onEdit={handleGithubEdit}
         onDelete={handleGithubDelete}
       />
       <OpenClawIntegrationModal
@@ -1458,7 +1509,7 @@ export default function WorkspaceOfficePage({
         onGatewayUrlChange={setGatewayUrl}
         token={gatewayToken}
         onTokenChange={setGatewayToken}
-        saved={savedGateway}
+        gateways={savedGateways}
         error={gatewayError}
         notice={gatewayNotice}
         submitting={gatewayBusy}
@@ -2753,6 +2804,8 @@ function StageActor({
           ? "none"
           : travel
           ? `left ${travelMs ?? 320}ms linear, top ${travelMs ?? 320}ms linear`
+          : actor.kind === "member"
+          ? "left 28ms linear, top 28ms linear"
           : "left 90ms linear, top 90ms linear",
       }}
       onClick={() => onSelect(actor)}
@@ -4667,7 +4720,7 @@ const PLAYER_STAGE_BOUNDS = {
   maxY: 91,
 };
 const AGENT_TRAVEL_MIN_SEGMENT_MS = 90;
-const PRESENCE_POSITION_THROTTLE_MS = 100;
+const PRESENCE_POSITION_THROTTLE_MS = 33;
 const QUEST_MARKER_POSITION: StageActorPosition = { left: "90.4%", top: "75.8%" };
 const QUEST_INTERACTION_RADIUS_PCT = 6.5;
 const ACTOR_INTERACTION_RADIUS_PCT = 7;
@@ -6224,7 +6277,7 @@ function SlackIntegrationModal({
   onClose,
   onBack,
   isAdmin,
-  saved,
+  integrations,
   error,
   notice,
   submitting,
@@ -6236,14 +6289,15 @@ function SlackIntegrationModal({
   onClose: () => void;
   onBack: () => void;
   isAdmin: boolean;
-  saved: SlackIntegration | null;
+  integrations: SlackIntegration[];
   error: string;
   notice: string;
   submitting: boolean;
   deleting: boolean;
   onInstall: () => void;
-  onDelete: () => void;
+  onDelete: (integrationId: number) => void;
 }) {
+  const hasIntegrations = integrations.length > 0;
   return (
     <Modal open={open} onClose={onClose} title="Slack 연동" size="md">
       <Modal.Body className="grid gap-5 md:grid-cols-[minmax(0,1fr)_260px]">
@@ -6275,7 +6329,7 @@ function SlackIntegrationModal({
                 boxShadow: "none",
               }}
             >
-              {saved ? "Slack 다시 연동하기" : "Slack 연동하기"}
+              {hasIntegrations ? "Slack 추가 연동하기" : "Slack 연동하기"}
             </Button>
           </div>
           {!isAdmin && (
@@ -6287,37 +6341,47 @@ function SlackIntegrationModal({
           {notice && <p className="text-caption text-success">{notice}</p>}
         </div>
 
-        <div className="relative min-h-[260px] rounded-lg border border-border bg-surface-raised/70 p-4 pb-12">
+        <div className="relative min-w-0 min-h-[260px] rounded-lg border border-border bg-surface-raised/70 p-4">
           <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary-muted text-primary">
-            {saved ? <CheckCircle2 /> : <KeyRound />}
+            {hasIntegrations ? <CheckCircle2 /> : <KeyRound />}
           </div>
-          <h3 className="mt-4 text-title text-text">저장 상태</h3>
+          <h3 className="mt-4 text-title text-text">저장된 Slack 연동</h3>
           <p className="mt-1 text-caption text-text-muted">
-            저장된 Slack 연동 정보가 자동으로 표시됩니다.
+            총 {integrations.length}개의 Slack 연동 정보가 표시됩니다.
           </p>
-          {saved ? (
-            <div className="mt-4 grid gap-2 text-caption">
-              <Info label="ID" value={String(saved.id)} />
-              <Info label="Team" value={saved.slackTeamId} />
-              <Info label="Channel" value={saved.slackChannelId} />
-              <Info label="Token" value={saved.maskedBotToken} />
+          {hasIntegrations ? (
+            <div className="mt-4 grid max-h-[320px] gap-3 overflow-y-auto pr-1">
+              {integrations.map((integration) => (
+                <div
+                  key={integration.id}
+                  className="min-w-0 rounded-md border border-border bg-surface/70 p-3"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="min-w-0 truncate text-caption font-semibold text-text">
+                      Channel {integration.slackChannelId}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onDelete(integration.id)}
+                      disabled={!isAdmin || submitting || deleting}
+                      className="shrink-0 text-caption text-text-muted hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {deleting ? "삭제 중" : "삭제"}
+                    </button>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-caption">
+                    <Info label="ID" value={String(integration.id)} />
+                    <Info label="Team" value={integration.slackTeamId} />
+                    <Info label="Channel" value={integration.slackChannelId} />
+                    <Info label="Token" value={integration.maskedBotToken} />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : (
             <p className="mt-4 text-caption text-text-muted">
               저장된 Slack 연동 정보가 없습니다.
             </p>
-          )}
-          {saved && (
-            <div className="absolute bottom-3 right-3 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={onDelete}
-                disabled={!isAdmin || submitting || deleting}
-                className="text-caption text-text-muted hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {deleting ? "삭제 중" : "삭제"}
-              </button>
-            </div>
           )}
         </div>
       </Modal.Body>
@@ -6379,12 +6443,15 @@ function GithubIntegrationModal({
   onDisplayNameChange,
   token,
   onTokenChange,
-  saved,
+  selected,
+  credentials,
   error,
   notice,
   submitting,
   deleting,
   onSubmit,
+  onCreateMode,
+  onEdit,
   onDelete,
 }: {
   open: boolean;
@@ -6395,14 +6462,18 @@ function GithubIntegrationModal({
   onDisplayNameChange: (value: string) => void;
   token: string;
   onTokenChange: (value: string) => void;
-  saved: GithubCredentialInfo | null;
+  selected: GithubCredentialInfo | null;
+  credentials: GithubCredentialInfo[];
   error: string;
   notice: string;
   submitting: boolean;
   deleting: boolean;
   onSubmit: (e: FormEvent) => void;
-  onDelete: () => void;
+  onCreateMode: () => void;
+  onEdit: (credential: GithubCredentialInfo) => void;
+  onDelete: (credentialId: number) => void;
 }) {
+  const editing = Boolean(selected);
   return (
     <Modal open={open} onClose={onClose} title="GitHub 연결" size="md">
       <form onSubmit={onSubmit}>
@@ -6421,10 +6492,20 @@ function GithubIntegrationModal({
                 type="password"
                 value={token}
                 onChange={(e) => onTokenChange(e.target.value)}
-                placeholder={saved ? "변경할 때만 입력" : "ghp_..."}
+                placeholder={editing ? "변경할 때만 입력" : "ghp_..."}
                 disabled={!isAdmin || submitting}
               />
             </Field>
+            {credentials.length > 0 && (
+              <button
+                type="button"
+                onClick={onCreateMode}
+                disabled={!isAdmin || submitting || deleting}
+                className="self-start text-caption text-text-muted hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                새 GitHub 연결 등록
+              </button>
+            )}
             {!isAdmin && (
               <p className="text-caption text-danger">
                 GitHub 연결은 워크스페이스 ADMIN만 설정할 수 있습니다.
@@ -6436,42 +6517,62 @@ function GithubIntegrationModal({
 
           <div className="relative min-w-0 min-h-[260px] rounded-lg border border-border bg-surface-raised/70 p-4 pb-12">
             <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary-muted text-primary">
-              {saved ? <CheckCircle2 /> : <GitBranch />}
+              {credentials.length > 0 ? <CheckCircle2 /> : <GitBranch />}
             </div>
-            <h3 className="mt-4 text-title text-text">저장 상태</h3>
+            <h3 className="mt-4 text-title text-text">저장된 GitHub 연결</h3>
             <p className="mt-1 text-caption text-text-muted">
-              저장된 GitHub 연결 정보가 자동으로 표시됩니다.
+              총 {credentials.length}개의 GitHub 자격 증명이 표시됩니다.
             </p>
-            {saved ? (
-              <div className="mt-4 grid gap-2 text-caption">
-                <Info label="ID" value={String(saved.id)} />
-                <Info label="Name" value={saved.displayName} />
-                <Info label="Token" value={saved.maskedToken} />
+            {credentials.length > 0 ? (
+              <div className="mt-4 grid max-h-[320px] gap-3 overflow-y-auto pr-1">
+                {credentials.map((credential) => {
+                  const active = selected?.id === credential.id;
+                  return (
+                    <div
+                      key={credential.id}
+                      className="min-w-0 rounded-md border bg-surface/70 p-3"
+                      style={{
+                        borderColor: active ? t4.pink : "var(--border)",
+                        boxShadow: active ? `0 0 12px ${t4.pink}30` : "none",
+                      }}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="min-w-0 truncate text-caption font-semibold text-text">
+                          {credential.displayName}
+                        </span>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => onEdit(credential)}
+                            disabled={!isAdmin || submitting || deleting}
+                            className="text-caption text-text-muted hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            수정
+                          </button>
+                          <span className="text-caption text-text-dim">·</span>
+                          <button
+                            type="button"
+                            onClick={() => onDelete(credential.id)}
+                            disabled={!isAdmin || submitting || deleting}
+                            className="text-caption text-text-muted hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {deleting ? "삭제 중" : "삭제"}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="mt-3 grid gap-2 text-caption">
+                        <Info label="ID" value={String(credential.id)} />
+                        <Info label="Name" value={credential.displayName} />
+                        <Info label="Token" value={credential.maskedToken} />
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <p className="mt-4 text-caption text-text-muted">
                 저장된 GitHub 연결 정보가 없습니다.
               </p>
-            )}
-            {saved && (
-              <div className="absolute bottom-3 right-3 flex items-center gap-2">
-                <button
-                  type="submit"
-                  disabled={!isAdmin || deleting || submitting}
-                  className="text-caption text-text-muted hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {submitting ? "저장 중" : "수정"}
-                </button>
-                <span className="text-caption text-text-dim">·</span>
-                <button
-                  type="button"
-                  onClick={onDelete}
-                  disabled={!isAdmin || submitting || deleting}
-                  className="text-caption text-text-muted hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {deleting ? "삭제 중" : "삭제"}
-                </button>
-              </div>
             )}
           </div>
         </Modal.Body>
@@ -6479,11 +6580,9 @@ function GithubIntegrationModal({
           <Button type="button" variant="ghost" icon={<ArrowLeft />} onClick={onBack} disabled={submitting}>
             채널 설정
           </Button>
-          {!saved && (
-            <Button type="submit" icon={<KeyRound />} loading={submitting} disabled={!isAdmin}>
-              연결 저장
-            </Button>
-          )}
+          <Button type="submit" icon={<KeyRound />} loading={submitting} disabled={!isAdmin || deleting}>
+            {editing ? "연결 수정" : "연결 저장"}
+          </Button>
         </Modal.Footer>
       </form>
     </Modal>
@@ -6498,7 +6597,7 @@ function OpenClawIntegrationModal({
   onGatewayUrlChange,
   token,
   onTokenChange,
-  saved,
+  gateways,
   error,
   notice,
   submitting,
@@ -6513,7 +6612,7 @@ function OpenClawIntegrationModal({
   onGatewayUrlChange: (value: string) => void;
   token: string;
   onTokenChange: (value: string) => void;
-  saved: WorkspaceGatewayStatus | null;
+  gateways: WorkspaceGatewayStatus[];
   error: string;
   notice: string;
   submitting: boolean;
@@ -6522,6 +6621,7 @@ function OpenClawIntegrationModal({
   onTest: () => void;
 }) {
   const busy = submitting || testing;
+  const hasGateways = gateways.length > 0;
   return (
     <Modal open={open} onClose={onClose} title="AI / OpenClaw 연동" size="md">
       <form onSubmit={onSubmit}>
@@ -6553,28 +6653,44 @@ function OpenClawIntegrationModal({
             {notice && <p className="text-caption text-success">{notice}</p>}
           </div>
 
-          <div className="relative min-h-[260px] rounded-lg border border-border bg-surface-raised/70 p-4 pb-12">
+          <div className="relative min-w-0 min-h-[260px] rounded-lg border border-border bg-surface-raised/70 p-4 pb-12">
             <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary-muted text-primary">
-              {saved?.bound ? <CheckCircle2 /> : <Bot />}
+              {hasGateways ? <CheckCircle2 /> : <Bot />}
             </div>
-            <h3 className="mt-4 text-title text-text">Gateway 상태</h3>
+            <h3 className="mt-4 text-title text-text">Gateway 연결 목록</h3>
             <p className="mt-1 text-caption text-text-muted">
-              저장된 Gateway 연결 상태를 API 기준으로 표시합니다.
+              총 {gateways.length}개의 Gateway 연결 상태를 표시합니다.
             </p>
-            {saved?.bound && (
-              <div className="mt-4 grid gap-2 text-caption">
-                <Info label="ID" value={String(saved.bindingId ?? "-")} />
-                <Info label="Mode" value={saved.mode ?? "-"} />
-                <Info label="URL" value={saved.gatewayUrl ?? "-"} />
-                <Info label="Token" value={saved.maskedToken ?? "-"} />
-                <Info label="Status" value={gatewayStatusLabel(saved)} />
-                {saved.lastError && <Info label="Error" value={saved.lastError} />}
+            {hasGateways ? (
+              <div className="mt-4 grid max-h-[320px] gap-3 overflow-y-auto pr-1">
+                {gateways.map((gateway) => (
+                  <div
+                    key={gateway.bindingId ?? gateway.gatewayUrl ?? "gateway"}
+                    className="min-w-0 rounded-md border border-border bg-surface/70 p-3"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="min-w-0 truncate text-caption font-semibold text-text">
+                        {gateway.gatewayUrl ?? "Gateway"}
+                      </span>
+                      <span className="shrink-0 text-caption text-success">
+                        {gateway.lastStatus === "CONNECTED" ? "CONNECTED" : gateway.status}
+                      </span>
+                    </div>
+                    <div className="mt-3 grid gap-2 text-caption">
+                      <Info label="ID" value={String(gateway.bindingId ?? "-")} />
+                      <Info label="Mode" value={gateway.mode ?? "-"} />
+                      <Info label="URL" value={gateway.gatewayUrl ?? "-"} />
+                      <Info label="Token" value={gateway.maskedToken ?? "-"} />
+                      <Info label="Status" value={gatewayStatusLabel(gateway)} />
+                      {gateway.lastError && <Info label="Error" value={gateway.lastError} />}
+                    </div>
+                  </div>
+                ))}
               </div>
-            )}
-            {saved && !saved.bound && (
+            ) : (
               <p className="mt-4 text-caption text-text-muted">연결된 Gateway가 없습니다.</p>
             )}
-            {saved?.bound && (
+            {hasGateways && (
               <div className="absolute bottom-3 right-3 flex items-center gap-2">
                 <button
                   type="submit"
@@ -6591,7 +6707,7 @@ function OpenClawIntegrationModal({
           <Button type="button" variant="ghost" icon={<ArrowLeft />} onClick={onBack} disabled={busy}>
             채널 설정
           </Button>
-          {!saved?.bound && (
+          {!hasGateways && (
             <Button type="submit" icon={<KeyRound />} loading={submitting} disabled={testing}>
               연결 저장
             </Button>
