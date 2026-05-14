@@ -6434,7 +6434,7 @@ function GithubIntegrationModal({
             {notice && <p className="text-caption text-success">{notice}</p>}
           </div>
 
-          <div className="relative min-h-[260px] rounded-lg border border-border bg-surface-raised/70 p-4 pb-12">
+          <div className="relative min-w-0 min-h-[260px] rounded-lg border border-border bg-surface-raised/70 p-4 pb-12">
             <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary-muted text-primary">
               {saved ? <CheckCircle2 /> : <GitBranch />}
             </div>
@@ -6613,9 +6613,11 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 function Info({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="text-text-muted">{label}</span>
-      <span className="truncate font-semibold text-text">{value}</span>
+    <div className="flex min-w-0 items-center justify-between gap-3">
+      <span className="shrink-0 text-text-muted">{label}</span>
+      <span className="min-w-0 truncate text-right font-semibold text-text" title={value}>
+        {value}
+      </span>
     </div>
   );
 }
