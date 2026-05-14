@@ -374,6 +374,7 @@ export default function WorkspaceOfficePage({
   const [selectedActorId, setSelectedActorId] = useState<string | null>(null);
   const [stageZoom, setStageZoom] = useState(1);
   const [stagePan, setStagePan] = useState<StagePan>({ x: 0, y: 0 });
+  const initialCameraWorkspaceRef = useRef<number | null>(null);
   const [playerPositionOverride, setPlayerPositionOverride] = useState<{
     workspaceId: number;
     actorId: string;
@@ -804,6 +805,12 @@ export default function WorkspaceOfficePage({
     [agentCount, engineeringRows, stageWorldSize],
   );
 
+  useEffect(() => {
+    if (!playerPosition || initialCameraWorkspaceRef.current === id) return;
+    initialCameraWorkspaceRef.current = id;
+    setStagePan(getStagePanForPosition(playerPosition, stageWorldSize, stageZoom));
+  }, [id, playerPosition, stageWorldSize, stageZoom]);
+
   if (state.kind === "loading") return <WorkspaceLoadingState />;
   if (state.kind === "error") return <WorkspaceErrorState message={state.message} />;
 
@@ -817,6 +824,13 @@ export default function WorkspaceOfficePage({
 
   function handleWorkspaceLeavePlaceholder() {
     setWorkspaceLeaveNotice("워크스페이스 나가기 API가 준비되면 연결됩니다.");
+  }
+
+  function updateStageZoom(nextZoom: number) {
+    setStageZoom(nextZoom);
+    if (playerPosition) {
+      setStagePan(getStagePanForPosition(playerPosition, stageWorldSize, nextZoom));
+    }
   }
 
   async function handleSlackInstall() {
@@ -1057,6 +1071,7 @@ export default function WorkspaceOfficePage({
 
   function openActorChat(actor: OfficeActor, tab: "chat" | "tasks" = "chat") {
     setActorMenu(null);
+    if (playerActorId != null && String(actor.id) === playerActorId) return;
     setChatTarget(actor);
     setChatInitialTab(actor.kind === "agent" ? tab : "chat");
     setChatPollError("");
@@ -1276,9 +1291,9 @@ export default function WorkspaceOfficePage({
         />
         <MapZoomControls
           zoom={stageZoom}
-          onZoomOut={() => setStageZoom((value) => clampStageZoom(value - STAGE_ZOOM_STEP))}
-          onReset={() => setStageZoom(1)}
-          onZoomIn={() => setStageZoom((value) => clampStageZoom(value + STAGE_ZOOM_STEP))}
+          onZoomOut={() => updateStageZoom(clampStageZoom(stageZoom - STAGE_ZOOM_STEP))}
+          onReset={() => updateStageZoom(1)}
+          onZoomIn={() => updateStageZoom(clampStageZoom(stageZoom + STAGE_ZOOM_STEP))}
         />
 
         <ActorContextMenu
@@ -1309,6 +1324,7 @@ export default function WorkspaceOfficePage({
         <DialogueBox
           actors={actors}
           selectedActor={selectedActor}
+          playerActorId={playerActorId}
           adminCount={adminCount}
           chatMessages={chatMessages}
           onTalk={openActorChat}
@@ -2730,6 +2746,9 @@ function StageActor({
       style={{
         left: position.left,
         top: position.top,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
         transition: isPlayer
           ? "none"
           : travel
@@ -2739,6 +2758,7 @@ function StageActor({
       onClick={() => onSelect(actor)}
       onContextMenu={(event) => {
         event.preventDefault();
+        if (isPlayer) return;
         onContextMenu({ actor, x: event.clientX, y: event.clientY });
       }}
       aria-label={isPlayer ? `${actor.name} 플레이어` : `${actor.name} 채팅`}
@@ -2749,14 +2769,15 @@ function StageActor({
           className="stage-actor__player-marker absolute left-1/2 -translate-x-1/2"
           style={{
             top: -50,
-            color: t4.pink,
-            fontFamily: "var(--font-pixel)",
-            fontSize: 11,
-            textShadow: `0 0 8px ${t4.pink}`,
+            marginLeft: 5,
+            width: 0,
+            height: 0,
+            borderLeft: "6px solid transparent",
+            borderRight: "6px solid transparent",
+            borderTop: `9px solid ${t4.pink}`,
+            filter: `drop-shadow(0 0 6px ${t4.pink})`,
           }}
-        >
-          ▼
-        </span>
+        />
       )}
       {visibleSpeech && (
         <div
@@ -2831,6 +2852,9 @@ function StageActor({
       <div
         className="stage-actor__avatar relative"
         style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
           padding: 4,
           filter:
             selected || hasActiveTask
@@ -4340,6 +4364,7 @@ function getFeaturedAgent(actors: OfficeActor[], selectedActor: OfficeActor | nu
 function DialogueBox({
   actors,
   selectedActor,
+  playerActorId,
   adminCount,
   chatMessages,
   onTalk,
@@ -4350,6 +4375,7 @@ function DialogueBox({
 }: {
   actors: OfficeActor[];
   selectedActor: OfficeActor | null;
+  playerActorId: string | null;
   adminCount: number;
   chatMessages: Record<string, ChatMessage[]>;
   onTalk: (actor: OfficeActor) => void;
@@ -4360,6 +4386,7 @@ function DialogueBox({
 }) {
   const featured = getFeaturedActor(actors, selectedActor);
   const isAgent = featured?.kind === "agent";
+  const isSelf = Boolean(featured && playerActorId != null && String(featured.id) === playerActorId);
   const featuredAgentId = featured && isAgent ? agentIdFromActor(featured) : null;
   const dismissing = Boolean(featuredAgentId && dismissBusyId === featuredAgentId);
   const speaker = featured?.name ?? "GUIDE";
@@ -4435,7 +4462,11 @@ function DialogueBox({
               fontSize: 12,
               color: t4.ink,
               lineHeight: 1.55,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
             }}
+            title={line}
           >
             {line}
           </div>
@@ -4453,7 +4484,7 @@ function DialogueBox({
           )}
           <div className="mt-3 flex flex-wrap gap-2">
             {featured ? (
-              <DialogueChoice primary onClick={() => onTalk(featured)}>
+              <DialogueChoice primary disabled={isSelf} onClick={() => onTalk(featured)}>
                 <GlyphText glyph="▶">TALK</GlyphText>
               </DialogueChoice>
             ) : null}
@@ -4494,7 +4525,8 @@ function DialogueChoice({
   disabled?: boolean;
   onClick?: () => void;
 }) {
-  const color = primary ? t4.pink : t4.dim;
+  const color = disabled ? t4.dim : primary ? t4.pink : t4.dim;
+  const borderColor = disabled ? t4.line : primary ? t4.pink : t4.line;
   return (
     <button
       type="button"
@@ -4505,10 +4537,14 @@ function DialogueChoice({
         fontSize: 9,
         letterSpacing: 1,
         padding: "8px 12px",
-        border: `1px solid ${primary ? t4.pink : t4.line}`,
+        border: `1px solid ${borderColor}`,
         color,
-        background: primary ? "rgba(255,122,220,0.08)" : "transparent",
-        boxShadow: primary ? `0 0 10px ${t4.pink}40` : "none",
+        background: disabled
+          ? "rgba(255,255,255,0.03)"
+          : primary
+          ? "rgba(255,122,220,0.08)"
+          : "transparent",
+        boxShadow: disabled ? "none" : primary ? `0 0 10px ${t4.pink}40` : "none",
         cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.55 : 1,
       }}

@@ -38,6 +38,9 @@ export const PA_PALETTES: Record<PixelAvatarKind, Palette> = {
 
 export type PixelAvatarDirection = "S" | "N" | "E" | "W";
 
+const AVATAR_VISIBLE_COLS = 11;
+const AVATAR_VISIBLE_ROWS = 14;
+
 const HERO_FRAMES: Record<PixelAvatarDirection, string[]> = {
   S: [
     "...HHHHHH.......",
@@ -233,8 +236,8 @@ export default function PixelAvatar({
         .join(" ")}
       style={{
         position: "relative",
-        width: 16 * size,
-        height: 14 * size,
+        width: AVATAR_VISIBLE_COLS * size,
+        height: AVATAR_VISIBLE_ROWS * size,
         imageRendering: "pixelated",
         ...style,
       }}
