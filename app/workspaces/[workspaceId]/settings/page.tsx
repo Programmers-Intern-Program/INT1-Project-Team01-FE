@@ -359,7 +359,7 @@ export default function WorkspaceSettingsPage({
               marginTop: 8,
             }}
           >
-            Manage workspace info, roster, and invite codes from this deck.
+            워크스페이스 정보, 멤버, 초대 코드를 이 화면에서 관리하세요.
           </p>
         </div>
 
@@ -436,7 +436,7 @@ export default function WorkspaceSettingsPage({
             {activeSection === "workspace" && (
               <div className="grid gap-4">
                 <T4Panel label="WORKSPACE INFO" accent={t4.pink} style={{ position: "relative", padding: 22 }}>
-                  <SectionTitle title="WORKSPACE INFO" description="Only ADMIN can edit workspace name and briefing." />
+                  <SectionTitle title="WORKSPACE INFO" description="ADMIN만 워크스페이스 이름과 소개를 수정할 수 있습니다." />
                   <form onSubmit={handleUpdateWorkspace} className="mt-5 grid gap-4">
                     <Field label="WORKSPACE NAME">
                       <Input value={nameInput} onChange={(e) => setNameInput(e.target.value)} disabled={!isAdmin || updateBusy} />
@@ -498,7 +498,7 @@ export default function WorkspaceSettingsPage({
                           color: t4.dim,
                         }}
                       >
-                        ADMIN only. After deletion you return to the workspaces list.
+                        ADMIN 전용. 삭제 후에는 워크스페이스 목록으로 돌아갑니다.
                       </p>
                     </div>
                     <Button type="button" variant="danger" disabled={!isAdmin} onClick={() => setDeleteOpen(true)}>DELETE</Button>
@@ -509,7 +509,7 @@ export default function WorkspaceSettingsPage({
 
             {activeSection === "members" && (
               <T4Panel label="ROSTER" accent={t4.mp} style={{ position: "relative", padding: 22 }}>
-                <SectionTitle title="ROSTER" description="Inspect every workspace member and remove with ADMIN privilege." />
+                <SectionTitle title="ROSTER" description="워크스페이스 멤버를 확인하고, ADMIN 권한으로 내보낼 수 있습니다." />
                 {memberError && <p className="mt-3" style={errorStyle}><GlyphText glyph="⚠">{memberError}</GlyphText></p>}
                 <div className="mt-5 grid gap-2">
                   {state.members.map((member) => (
@@ -576,7 +576,7 @@ export default function WorkspaceSettingsPage({
 
             {activeSection === "invite" && (
               <T4Panel label="INVITE" accent={t4.xp} style={{ position: "relative", padding: 22 }}>
-                <SectionTitle title="INVITE" description="Send by email or just generate a copy-link summon." />
+                <SectionTitle title="INVITE" description="이메일로 보내거나, 복사 가능한 초대 링크를 생성하세요." />
                 <form onSubmit={handleCreateInvite} className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,420px)_minmax(280px,1fr)]">
                   <div className="grid gap-4">
                     <div>
@@ -660,7 +660,7 @@ export default function WorkspaceSettingsPage({
                               color: t4.dim,
                             }}
                           >
-                            Generates a copy-and-share link without sending email.
+                            이메일을 보내지 않고 복사해서 공유할 수 있는 링크를 생성합니다.
                           </p>
                         </div>
                       )}
@@ -716,7 +716,7 @@ export default function WorkspaceSettingsPage({
                             color: t4.dim,
                           }}
                         >
-                          Generated invite shows up here.
+                          생성된 초대가 여기에 표시됩니다.
                         </p>
                       </div>
                       {createdInviteUrl && (
@@ -781,8 +781,8 @@ export default function WorkspaceSettingsPage({
                           }}
                         >
                           {inviteCreateMode === "email"
-                            ? <GlyphText glyph="◇">create an invite to summon a teammate</GlyphText>
-                            : <GlyphText glyph="◇">generate a copy-link to share</GlyphText>}
+                            ? <GlyphText glyph="◇">팀원을 초대할 새 초대를 생성하세요</GlyphText>
+                            : <GlyphText glyph="◇">공유할 복사 링크를 생성하세요</GlyphText>}
                         </p>
                       </div>
                     )}
@@ -794,7 +794,7 @@ export default function WorkspaceSettingsPage({
             {activeSection === "invites" && (
               <T4Panel label="INVITE LOG" accent={t4.agent} style={{ position: "relative", padding: 22 }}>
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <SectionTitle title="INVITE LOG" description="Browse, extend, or revoke previously created invites." />
+                  <SectionTitle title="INVITE LOG" description="이전에 생성한 초대를 조회, 연장, 또는 취소합니다." />
                   <Button type="button" variant="secondary" icon={<RefreshCw />} loading={invitesLoading} onClick={() => refreshInvites()}>REFRESH</Button>
                 </div>
                 <div className="mt-5 flex flex-col gap-3">
@@ -828,7 +828,7 @@ export default function WorkspaceSettingsPage({
                           border: `1px dashed ${t4.line}`,
                         }}
                       >
-                        <GlyphText glyph="◇">no invites match this filter.</GlyphText>
+                        <GlyphText glyph="◇">해당 조건에 맞는 초대가 없습니다.</GlyphText>
                       </p>
                     )}
                   </div>
@@ -854,7 +854,6 @@ export default function WorkspaceSettingsPage({
           {deleteError && <p className="mt-3" style={errorStyle}><GlyphText glyph="⚠">{deleteError}</GlyphText></p>}
         </Modal.Body>
         <Modal.Footer>
-          <Button type="button" variant="ghost" disabled={deleteBusy} onClick={() => setDeleteOpen(false)}>CANCEL</Button>
           <Button type="button" variant="danger" loading={deleteBusy} onClick={handleDeleteWorkspace}>DELETE</Button>
         </Modal.Footer>
       </Modal>

@@ -1,4 +1,5 @@
 import { apiFetch } from "../api-client";
+import type { MemberProfile } from "./members";
 
 export type WorkspaceRole = "ADMIN" | "MEMBER";
 
@@ -9,6 +10,7 @@ export interface WorkspaceSummary {
   myRole: WorkspaceRole;
   agentCount: number;
   runningTaskCount: number;
+  completedTaskCount: number;
   createdAt: string;
 }
 
@@ -28,6 +30,22 @@ export interface WorkspaceMember {
   email: string;
   role: WorkspaceRole;
   joinedAt: string;
+  profile?: MemberProfile | null;
+}
+
+export interface WorkspaceMemberTaskStats {
+  memberId: number;
+  memberName: string;
+  rank: number;
+  taskCount: number;
+  completedTaskCount: number;
+  runningTaskCount: number;
+  failedTaskCount: number;
+  waitingUserTaskCount: number;
+  healthScore: number;
+  flowScore: number;
+  impactScore: number;
+  totalScore: number;
 }
 
 export interface CreateWorkspaceReq {
@@ -76,6 +94,12 @@ export function leaveWorkspace(workspaceId: number) {
 
 export function listWorkspaceMembers(workspaceId: number) {
   return apiFetch<WorkspaceMember[]>(`/api/v1/workspaces/${workspaceId}/members`);
+}
+
+export function listWorkspaceMemberTaskStats(workspaceId: number) {
+  return apiFetch<WorkspaceMemberTaskStats[]>(
+    `/api/v1/workspaces/${workspaceId}/members/task-stats`,
+  );
 }
 
 export function changeMemberRole(

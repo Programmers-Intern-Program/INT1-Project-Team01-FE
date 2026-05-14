@@ -23,14 +23,23 @@ import {
   X,
 } from "lucide-react";
 import { Button, Input, Modal } from "@/components/ui";
-import { GlyphText, T4Panel, PixelAvatar, type PixelAvatarKind, type PixelAvatarDirection } from "@/components/arcade";
+import {
+  GlyphText,
+  T4Panel,
+  PixelAvatar,
+  PA_PALETTES,
+  type PixelAvatarKind,
+  type PixelAvatarPaletteOverride,
+  type PixelAvatarDirection,
+} from "@/components/arcade";
 import { t4 } from "@/components/arcade/tokens";
 import {
   WorkspaceErrorState,
   WorkspaceLoadingState,
 } from "@/components/workspace/WorkspaceShell";
 import type { OfficeAgentState } from "@/game/office/EventBus";
-import { API_BASE, getAccessToken, getStoredUser, type ApiError } from "@/lib/api-client";
+import { API_BASE, apiFetch, getAccessToken, getStoredUser, type ApiError } from "@/lib/api-client";
+import type { MemberProfile } from "@/lib/api/members";
 import {
   deleteSlackIntegration,
   getSlackInstallUrl,
@@ -89,8 +98,10 @@ import {
 } from "@/lib/api/tasks";
 import {
   getWorkspace,
+  listWorkspaceMemberTaskStats,
   listWorkspaceMembers,
   type WorkspaceDetail,
+  type WorkspaceMemberTaskStats,
   type WorkspaceMember,
 } from "@/lib/api/workspaces";
 
@@ -103,6 +114,7 @@ type OfficeActor = OfficeAgentState & {
   activeTaskCount?: number;
   activeTaskTitle?: string;
   activeTaskStatus?: TaskStatus;
+  avatarProfile?: StoredCharacterProfile;
 };
 
 type AgentRole = "ORCHESTRATOR" | "BACKEND" | "FRONTEND" | "QA" | "CUSTOM";
@@ -210,6 +222,13 @@ interface DashboardLogItem {
   message: string;
   createdAt?: string;
 }
+
+interface StoredCharacterProfile {
+  kind: PixelAvatarKind;
+  paletteOverride?: PixelAvatarPaletteOverride;
+}
+
+const CHARACTER_STORAGE_KEY = "ai-office.character";
 
 const STATUS_META: Record<
   OfficeActor["status"],
@@ -355,6 +374,7 @@ export default function WorkspaceOfficePage({
   const [selectedActorId, setSelectedActorId] = useState<string | null>(null);
   const [stageZoom, setStageZoom] = useState(1);
   const [stagePan, setStagePan] = useState<StagePan>({ x: 0, y: 0 });
+  const initialCameraWorkspaceRef = useRef<number | null>(null);
   const [playerPositionOverride, setPlayerPositionOverride] = useState<{
     workspaceId: number;
     actorId: string;
@@ -373,12 +393,17 @@ export default function WorkspaceOfficePage({
   const [artifactView, setArtifactView] = useState<{ path: string; name?: string } | null>(null);
   const [filesOpen, setFilesOpen] = useState(false);
   const [tasks, setTasks] = useState<WorkspaceTask[]>([]);
+  const [memberTaskStats, setMemberTaskStats] = useState<WorkspaceMemberTaskStats[]>([]);
   const [tasksError, setTasksError] = useState("");
 
   const refreshTasks = useCallback(async () => {
     try {
-      const nextTasks = await listWorkspaceTasks(id);
+      const [nextTasks, nextMemberTaskStats] = await Promise.all([
+        listWorkspaceTasks(id),
+        listWorkspaceMemberTaskStats(id).catch(() => null),
+      ]);
       setTasks(nextTasks);
+      if (nextMemberTaskStats) setMemberTaskStats(nextMemberTaskStats);
       setTasksError("");
     } catch (err) {
       const apiErr = err as ApiError;
@@ -409,11 +434,12 @@ export default function WorkspaceOfficePage({
     (async () => {
       if (!getStoredUser()) return;
       try {
-        const [workspace, members, initialTasks, initialAgents] = await Promise.all([
+        const [workspace, members, initialTasks, initialAgents, initialMemberTaskStats] = await Promise.all([
           getWorkspace(id),
           listWorkspaceMembers(id),
           listWorkspaceTasks(id).catch(() => []),
           listAgents(id).catch(() => readHiredAgents(id)),
+          listWorkspaceMemberTaskStats(id).catch(() => []),
         ]);
         if (!cancelled) {
           const nextAgents = initialAgents.map(toHiredAgent);
@@ -421,6 +447,7 @@ export default function WorkspaceOfficePage({
           writeHiredAgents(id, nextAgents);
           setChatSessionIds(readChatSessionIds(id));
           setTasks(initialTasks);
+          setMemberTaskStats(initialMemberTaskStats);
           setState({ kind: "ready", workspace, members });
         }
       } catch (err) {
@@ -459,12 +486,14 @@ export default function WorkspaceOfficePage({
       if (inFlight) return;
       inFlight = true;
       try {
-        const [nextTasks, nextAgents] = await Promise.all([
+        const [nextTasks, nextAgents, nextMemberTaskStats] = await Promise.all([
           listWorkspaceTasks(id),
           listAgents(id).catch(() => null),
+          listWorkspaceMemberTaskStats(id).catch(() => null),
         ]);
         if (!cancelled) {
           setTasks(nextTasks);
+          if (nextMemberTaskStats) setMemberTaskStats(nextMemberTaskStats);
           if (nextAgents) {
             const mappedAgents = nextAgents.map(toHiredAgent);
             setHiredAgents(mappedAgents);
@@ -671,6 +700,7 @@ export default function WorkspaceOfficePage({
   }, [id, openClawOpen]);
 
   const storedUser = getStoredUser();
+  const storedCharacter = loadStoredCharacterProfile();
   const storedMemberId = storedUser?.memberId;
   const playerActorId = storedMemberId != null ? `member:${storedMemberId}` : null;
   const {
@@ -742,11 +772,12 @@ export default function WorkspaceOfficePage({
       : state.members;
     const memberActors = visibleMembers.map<OfficeActor>((member, index) => ({
       id: `member:${member.memberId}`,
-      name: member.name,
+      name: member.profile?.displayName || member.name,
       role: member.role,
       status: pickStatus(index, member.role),
       desk: agentActors.length + index,
       kind: "member",
+      avatarProfile: memberProfileToStoredCharacter(member.profile),
     }));
     return [...agentActors, ...memberActors];
   }, [
@@ -774,16 +805,32 @@ export default function WorkspaceOfficePage({
     [agentCount, engineeringRows, stageWorldSize],
   );
 
+  useEffect(() => {
+    if (!playerPosition || initialCameraWorkspaceRef.current === id) return;
+    initialCameraWorkspaceRef.current = id;
+    setStagePan(getStagePanForPosition(playerPosition, stageWorldSize, stageZoom));
+  }, [id, playerPosition, stageWorldSize, stageZoom]);
+
   if (state.kind === "loading") return <WorkspaceLoadingState />;
   if (state.kind === "error") return <WorkspaceErrorState message={state.message} />;
 
-  const workingCount = actors.filter((actor) => actor.status === "working").length;
   const adminCount = state.members.filter((member) => member.role === "ADMIN").length;
   const isAdmin = state.workspace.myRole === "ADMIN";
   const myMiniMapPosition = playerPosition ?? defaultPlayerPosition;
+  const myWorkspaceMember = state.members.find((member) => member.memberId === storedMemberId);
+  const myAvatarProfile = memberProfileToStoredCharacter(myWorkspaceMember?.profile) ?? storedCharacter;
+  const myMemberTaskStats = memberTaskStats.find((stats) => stats.memberId === storedMemberId);
+  const heroStats = buildHeroHudStats(tasks, actors, myMemberTaskStats);
 
   function handleWorkspaceLeavePlaceholder() {
     setWorkspaceLeaveNotice("워크스페이스 나가기 API가 준비되면 연결됩니다.");
+  }
+
+  function updateStageZoom(nextZoom: number) {
+    setStageZoom(nextZoom);
+    if (playerPosition) {
+      setStagePan(getStagePanForPosition(playerPosition, stageWorldSize, nextZoom));
+    }
   }
 
   async function handleSlackInstall() {
@@ -1024,6 +1071,7 @@ export default function WorkspaceOfficePage({
 
   function openActorChat(actor: OfficeActor, tab: "chat" | "tasks" = "chat") {
     setActorMenu(null);
+    if (playerActorId != null && String(actor.id) === playerActorId) return;
     setChatTarget(actor);
     setChatInitialTab(actor.kind === "agent" ? tab : "chat");
     setChatPollError("");
@@ -1212,6 +1260,7 @@ export default function WorkspaceOfficePage({
           engineeringRows={engineeringRows}
           selectedActorId={selectedActorId}
           playerActorId={playerActorId}
+          playerAvatar={myAvatarProfile}
           playerPosition={playerPosition}
           remoteMemberPositions={remoteMemberPositions}
           zoom={stageZoom}
@@ -1228,9 +1277,9 @@ export default function WorkspaceOfficePage({
         />
 
         <HeroHud
-          name={storedUser?.name ?? "HERO"}
-          memberCount={state.members.length}
-          workingCount={workingCount}
+          name={myWorkspaceMember?.profile?.displayName || storedUser?.name || "HERO"}
+          avatar={myAvatarProfile}
+          stats={heroStats}
         />
         <MapHud
           rooms={getStageMiniMapRooms(stageRooms)}
@@ -1242,9 +1291,9 @@ export default function WorkspaceOfficePage({
         />
         <MapZoomControls
           zoom={stageZoom}
-          onZoomOut={() => setStageZoom((value) => clampStageZoom(value - STAGE_ZOOM_STEP))}
-          onReset={() => setStageZoom(1)}
-          onZoomIn={() => setStageZoom((value) => clampStageZoom(value + STAGE_ZOOM_STEP))}
+          onZoomOut={() => updateStageZoom(clampStageZoom(stageZoom - STAGE_ZOOM_STEP))}
+          onReset={() => updateStageZoom(1)}
+          onZoomIn={() => updateStageZoom(clampStageZoom(stageZoom + STAGE_ZOOM_STEP))}
         />
 
         <ActorContextMenu
@@ -1275,6 +1324,7 @@ export default function WorkspaceOfficePage({
         <DialogueBox
           actors={actors}
           selectedActor={selectedActor}
+          playerActorId={playerActorId}
           adminCount={adminCount}
           chatMessages={chatMessages}
           onTalk={openActorChat}
@@ -1723,6 +1773,7 @@ function ArcadeOfficeStage({
   engineeringRows,
   selectedActorId,
   playerActorId,
+  playerAvatar,
   playerPosition,
   remoteMemberPositions,
   zoom,
@@ -1740,6 +1791,7 @@ function ArcadeOfficeStage({
   engineeringRows: number;
   selectedActorId: string | null;
   playerActorId: string | null;
+  playerAvatar: StoredCharacterProfile | null;
   playerPosition: StageActorPosition | null;
   remoteMemberPositions: Record<number, StageActorPosition>;
   zoom: number;
@@ -2136,6 +2188,7 @@ function ArcadeOfficeStage({
                 actor={actor}
                 position={position}
                 isPlayer={isPlayer}
+                playerAvatar={playerAvatar}
                 travel={actor.kind === "agent"}
                 travelMs={transitionMs}
                 walking={(isPlayer && playerWalking) || traveling}
@@ -2657,6 +2710,7 @@ function StageActor({
   actor,
   position,
   isPlayer = false,
+  playerAvatar,
   travel,
   travelMs,
   walking,
@@ -2668,6 +2722,7 @@ function StageActor({
   actor: OfficeActor;
   position: StageActorPosition;
   isPlayer?: boolean;
+  playerAvatar: StoredCharacterProfile | null;
   travel?: boolean;
   travelMs?: number;
   walking?: boolean;
@@ -2691,6 +2746,9 @@ function StageActor({
       style={{
         left: position.left,
         top: position.top,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
         transition: isPlayer
           ? "none"
           : travel
@@ -2700,6 +2758,7 @@ function StageActor({
       onClick={() => onSelect(actor)}
       onContextMenu={(event) => {
         event.preventDefault();
+        if (isPlayer) return;
         onContextMenu({ actor, x: event.clientX, y: event.clientY });
       }}
       aria-label={isPlayer ? `${actor.name} 플레이어` : `${actor.name} 채팅`}
@@ -2710,14 +2769,15 @@ function StageActor({
           className="stage-actor__player-marker absolute left-1/2 -translate-x-1/2"
           style={{
             top: -50,
-            color: t4.pink,
-            fontFamily: "var(--font-pixel)",
-            fontSize: 11,
-            textShadow: `0 0 8px ${t4.pink}`,
+            marginLeft: 5,
+            width: 0,
+            height: 0,
+            borderLeft: "6px solid transparent",
+            borderRight: "6px solid transparent",
+            borderTop: `9px solid ${t4.pink}`,
+            filter: `drop-shadow(0 0 6px ${t4.pink})`,
           }}
-        >
-          ▼
-        </span>
+        />
       )}
       {visibleSpeech && (
         <div
@@ -2792,6 +2852,9 @@ function StageActor({
       <div
         className="stage-actor__avatar relative"
         style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
           padding: 4,
           filter:
             selected || hasActiveTask
@@ -2800,7 +2863,16 @@ function StageActor({
         }}
       >
         <PixelAvatar
-          kind={pickAvatarKind(actor.name, isAgent)}
+          kind={
+            isPlayer && playerAvatar
+              ? playerAvatar.kind
+              : actor.avatarProfile?.kind ?? pickAvatarKind(actor.name, isAgent)
+          }
+          paletteOverride={
+            isPlayer
+              ? playerAvatar?.paletteOverride ?? actor.avatarProfile?.paletteOverride
+              : actor.avatarProfile?.paletteOverride
+          }
           direction={direction}
           size={3}
           walking={avatarWalking}
@@ -2966,7 +3038,7 @@ function ActorChatSidePanel({
   if (!open || !target) return null;
   const isAgent = target?.kind === "agent";
   const accent = isAgent ? t4.agent : t4.pink;
-  const avatarKind: PixelAvatarKind = isAgent ? "agent" : "mira";
+  const avatarKind: PixelAvatarKind = isAgent ? "agent" : target.avatarProfile?.kind ?? "mira";
   const showingTasks = isAgent && activeTab === "tasks";
 
   return (
@@ -2995,7 +3067,11 @@ function ActorChatSidePanel({
               flexShrink: 0,
             }}
           >
-            <PixelAvatar kind={avatarKind} size={2} />
+            <PixelAvatar
+              kind={avatarKind}
+              size={2}
+              paletteOverride={!isAgent ? target.avatarProfile?.paletteOverride : undefined}
+            />
           </div>
           <div className="min-w-0">
             <p
@@ -3954,19 +4030,15 @@ function TaskDetailNotice({ text, danger = false }: { text: string; danger?: boo
 
 function HeroHud({
   name,
-  memberCount,
-  workingCount,
+  avatar,
+  stats,
 }: {
   name: string;
-  memberCount: number;
-  workingCount: number;
+  avatar: StoredCharacterProfile | null;
+  stats: HeroHudStats;
 }) {
-  const kind = pickAvatarKind(name);
+  const kind = avatar?.kind ?? pickAvatarKind(name);
   const display = name.toUpperCase().slice(0, 10);
-  const rank = Math.max(1, Math.min(99, memberCount * 7 + workingCount * 3));
-  const healthPct = workingCount === 0 ? 100 : Math.max(20, 100 - workingCount * 12);
-  const flowPct = Math.min(95, 25 + workingCount * 15);
-  const impactPct = Math.min(100, 12 + memberCount * 9);
   return (
     <T4Panel
       label="HERO"
@@ -3975,7 +4047,7 @@ function HeroHud({
     >
       <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
         <div style={{ background: "rgba(0,0,0,0.4)", padding: 4, border: `1px solid ${t4.pink}` }}>
-          <PixelAvatar kind={kind} size={2} />
+          <PixelAvatar kind={kind} size={2} paletteOverride={avatar?.paletteOverride} />
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -3983,18 +4055,78 @@ function HeroHud({
               {display}
             </span>
             <span style={{ fontFamily: "var(--font-pixel)", fontSize: 8, color: t4.xp, letterSpacing: 1 }}>
-              RANK {String(rank).padStart(2, "0")}
+              RANK {String(stats.rank).padStart(2, "0")}
             </span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 6 }}>
-            <MiniBar label="HEALTH" pct={healthPct} color={t4.hp} />
-            <MiniBar label="FLOW" pct={flowPct} color={t4.mp} />
-            <MiniBar label="IMPACT" pct={impactPct} color={t4.xp} thin />
+            <MiniBar label="HEALTH" pct={stats.healthPct} color={t4.hp} />
+            <MiniBar label="FLOW" pct={stats.flowPct} color={t4.mp} />
+            <MiniBar label="IMPACT" pct={stats.impactPct} color={t4.xp} thin />
           </div>
         </div>
       </div>
     </T4Panel>
   );
+}
+
+interface HeroHudStats {
+  rank: number;
+  healthPct: number;
+  flowPct: number;
+  impactPct: number;
+}
+
+function buildHeroHudStats(
+  tasks: WorkspaceTask[],
+  actors: OfficeActor[],
+  memberStats?: WorkspaceMemberTaskStats,
+): HeroHudStats {
+  if (memberStats) {
+    return {
+      rank: Math.round(clampMiniMapValue(memberStats.rank, 1, 99)),
+      healthPct: Math.round(clampMiniMapValue(memberStats.healthScore, 0, 100)),
+      flowPct: Math.round(clampMiniMapValue(memberStats.flowScore, 0, 100)),
+      impactPct: Math.round(clampMiniMapValue(memberStats.impactScore, 0, 100)),
+    };
+  }
+
+  const countStatus = (status: TaskStatus) =>
+    tasks.reduce((count, task) => count + (task.status === status ? 1 : 0), 0);
+  const activeTasks = tasks.filter((task) => ACTIVE_AGENT_TASK_STATUSES.includes(task.status)).length;
+  const completedTasks = countStatus("COMPLETED");
+  const failedTasks = countStatus("FAILED");
+  const canceledTasks = countStatus("CANCELED");
+  const waitingUserTasks = countStatus("WAITING_USER");
+  const agentActors = actors.filter((actor) => actor.kind === "agent");
+  const workingAgents = agentActors.filter((actor) => actor.status === "working").length;
+  const blockedAgents = agentActors.filter(
+    (actor) => actor.status === "blocked" || actor.status === "review",
+  ).length;
+  const totalTasks = tasks.length;
+  const flowCapacity = Math.max(1, agentActors.length * 2);
+
+  const healthPct = clampMiniMapValue(
+    100 - failedTasks * 18 - waitingUserTasks * 10 - blockedAgents * 12 - canceledTasks * 4,
+    15,
+    100,
+  );
+  const flowPct =
+    activeTasks === 0 && workingAgents === 0
+      ? 0
+      : clampMiniMapValue(20 + (activeTasks / flowCapacity) * 55 + workingAgents * 8, 5, 100);
+  const impactPct =
+    totalTasks === 0
+      ? 0
+      : clampMiniMapValue((completedTasks / totalTasks) * 100, 0, 100);
+  const rankScore = healthPct * 0.35 + flowPct * 0.2 + impactPct * 0.45;
+  const rank = Math.round(clampMiniMapValue(100 - rankScore + 1, 1, 99));
+
+  return {
+    rank,
+    healthPct: Math.round(healthPct),
+    flowPct: Math.round(flowPct),
+    impactPct: Math.round(impactPct),
+  };
 }
 
 function MiniBar({
@@ -4232,6 +4364,7 @@ function getFeaturedAgent(actors: OfficeActor[], selectedActor: OfficeActor | nu
 function DialogueBox({
   actors,
   selectedActor,
+  playerActorId,
   adminCount,
   chatMessages,
   onTalk,
@@ -4242,6 +4375,7 @@ function DialogueBox({
 }: {
   actors: OfficeActor[];
   selectedActor: OfficeActor | null;
+  playerActorId: string | null;
   adminCount: number;
   chatMessages: Record<string, ChatMessage[]>;
   onTalk: (actor: OfficeActor) => void;
@@ -4252,11 +4386,14 @@ function DialogueBox({
 }) {
   const featured = getFeaturedActor(actors, selectedActor);
   const isAgent = featured?.kind === "agent";
+  const isSelf = Boolean(featured && playerActorId != null && String(featured.id) === playerActorId);
   const featuredAgentId = featured && isAgent ? agentIdFromActor(featured) : null;
   const dismissing = Boolean(featuredAgentId && dismissBusyId === featuredAgentId);
   const speaker = featured?.name ?? "GUIDE";
   const accent = featured ? (isAgent ? t4.agent : t4.pink) : t4.dim;
-  const avatarKind: PixelAvatarKind = featured ? pickAvatarKind(featured.name, isAgent) : "agent";
+  const avatarKind: PixelAvatarKind = featured
+    ? featured.avatarProfile?.kind ?? pickAvatarKind(featured.name, isAgent)
+    : "agent";
   const history = featured ? chatMessages[chatKey(featured)] ?? [] : [];
   const lastTargetMessage = (() => {
     for (let i = history.length - 1; i >= 0; i--) {
@@ -4298,7 +4435,11 @@ function DialogueBox({
             boxShadow: `0 0 10px ${accent}50`,
           }}
         >
-          <PixelAvatar kind={avatarKind} size={3} />
+          <PixelAvatar
+            kind={avatarKind}
+            size={3}
+            paletteOverride={featured && !isAgent ? featured.avatarProfile?.paletteOverride : undefined}
+          />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
@@ -4321,7 +4462,11 @@ function DialogueBox({
               fontSize: 12,
               color: t4.ink,
               lineHeight: 1.55,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
             }}
+            title={line}
           >
             {line}
           </div>
@@ -4339,7 +4484,7 @@ function DialogueBox({
           )}
           <div className="mt-3 flex flex-wrap gap-2">
             {featured ? (
-              <DialogueChoice primary onClick={() => onTalk(featured)}>
+              <DialogueChoice primary disabled={isSelf} onClick={() => onTalk(featured)}>
                 <GlyphText glyph="▶">TALK</GlyphText>
               </DialogueChoice>
             ) : null}
@@ -4380,7 +4525,8 @@ function DialogueChoice({
   disabled?: boolean;
   onClick?: () => void;
 }) {
-  const color = primary ? t4.pink : t4.dim;
+  const color = disabled ? t4.dim : primary ? t4.pink : t4.dim;
+  const borderColor = disabled ? t4.line : primary ? t4.pink : t4.line;
   return (
     <button
       type="button"
@@ -4391,10 +4537,14 @@ function DialogueChoice({
         fontSize: 9,
         letterSpacing: 1,
         padding: "8px 12px",
-        border: `1px solid ${primary ? t4.pink : t4.line}`,
+        border: `1px solid ${borderColor}`,
         color,
-        background: primary ? "rgba(255,122,220,0.08)" : "transparent",
-        boxShadow: primary ? `0 0 10px ${t4.pink}40` : "none",
+        background: disabled
+          ? "rgba(255,255,255,0.03)"
+          : primary
+          ? "rgba(255,122,220,0.08)"
+          : "transparent",
+        boxShadow: disabled ? "none" : primary ? `0 0 10px ${t4.pink}40` : "none",
         cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.55 : 1,
       }}
@@ -4410,6 +4560,85 @@ function pickAvatarKind(name: string, agent = false): PixelAvatarKind {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
   return kinds[h % kinds.length];
+}
+
+function memberProfileToStoredCharacter(
+  profile?: MemberProfile | null,
+): StoredCharacterProfile | undefined {
+  if (!profile) return undefined;
+  const kinds: PixelAvatarKind[] = ["mira", "alex", "kenji", "yuna", "diego", "iris"];
+  if (!kinds.includes(profile.avatarKind as PixelAvatarKind)) return undefined;
+  const kind = profile.avatarKind as PixelAvatarKind;
+  const { skin, hair, shirt } = profile.avatarColors ?? {};
+  if (isOriginalAvatarColorSet(kind, profile.avatarColors)) {
+    return { kind };
+  }
+  return {
+    kind,
+    paletteOverride: {
+      skin,
+      skin2: shadeForAvatarColor(skin),
+      hair,
+      hair2: shadeForAvatarColor(hair),
+      shirt,
+      shirt2: shadeForAvatarColor(shirt),
+    },
+  };
+}
+
+function isOriginalAvatarColorSet(
+  kind: PixelAvatarKind,
+  colors?: { skin?: string; hair?: string; shirt?: string },
+) {
+  const palette = PA_PALETTES[kind] ?? PA_PALETTES.mira;
+  return (
+    colors?.skin === palette.skin &&
+    colors?.hair === palette.hair &&
+    colors?.shirt === palette.shirt
+  );
+}
+
+function shadeForAvatarColor(color?: string) {
+  const shades: Record<string, string> = {
+    "#f8d4b0": "#c8a47a",
+    "#f0c098": "#c08868",
+    "#d8a878": "#a87848",
+    "#9a6a48": "#6f472f",
+    "#1a1a1a": "#0a0a0a",
+    "#3a2a1a": "#1f1410",
+    "#a83a3a": "#6a1f1f",
+    "#5a3a8a": "#2a1a4a",
+    "#d8a838": "#a87808",
+    "#2a3a4a": "#15202c",
+    "#3a5a3a": "#1a3a1a",
+    "#a83a6a": "#681a3a",
+    "#d8c89a": "#a89868",
+  };
+  return color ? shades[color] ?? color : undefined;
+}
+
+function loadStoredCharacterProfile(): StoredCharacterProfile | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(CHARACTER_STORAGE_KEY);
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as {
+      kind?: string;
+      colorMode?: string;
+      paletteOverride?: PixelAvatarPaletteOverride;
+    };
+    const kinds: PixelAvatarKind[] = ["mira", "alex", "kenji", "yuna", "diego", "iris"];
+    if (!saved.kind || !kinds.includes(saved.kind as PixelAvatarKind)) return null;
+    if (saved.colorMode === "original") {
+      return { kind: saved.kind as PixelAvatarKind };
+    }
+    return {
+      kind: saved.kind as PixelAvatarKind,
+      paletteOverride: saved.paletteOverride,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function Skyline() {
@@ -4725,16 +4954,9 @@ function shouldIgnoreStageMovementKey(target: EventTarget | null) {
 }
 
 function buildWorkspacePresenceUrl(workspaceId: number, token: string) {
-  if (typeof window === "undefined") return null;
-  try {
-    const baseUrl = API_BASE ? new URL(API_BASE, window.location.origin).origin : window.location.origin;
-    const url = new URL(`/ws/workspaces/${workspaceId}/presence`, baseUrl);
-    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    url.searchParams.set("token", token);
-    return url.toString();
-  } catch {
-    return null;
-  }
+  const base = API_BASE.endsWith("/") ? API_BASE.slice(0, -1) : API_BASE;
+  const query = new URLSearchParams({ token });
+  return `${base}/api/v1/workspaces/${workspaceId}/presence/stream?${query.toString()}`;
 }
 
 function parsePresenceMessage(raw: string): Record<string, unknown> | null {
@@ -4783,7 +5005,7 @@ function useWorkspacePresence(
   workspaceId: number,
   memberId: number | undefined,
 ): WorkspacePresenceState {
-  const socketRef = useRef<WebSocket | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
   const pendingPositionRef = useRef<{ position: StageActorPosition; status: PresenceStatus } | null>(null);
   const lastPositionSentAtRef = useRef(0);
   const positionTimerRef = useRef<number | null>(null);
@@ -4792,18 +5014,19 @@ function useWorkspacePresence(
 
   const flushPosition = useCallback(() => {
     const pending = pendingPositionRef.current;
-    const socket = socketRef.current;
-    if (!pending || socket?.readyState !== WebSocket.OPEN) return;
-    socket.send(
-      JSON.stringify({
-        type: "presence.position",
+    if (!pending || !memberId) return;
+    pendingPositionRef.current = null;
+    lastPositionSentAtRef.current = Date.now();
+    void apiFetch(`/api/v1/workspaces/${workspaceId}/presence/me/position`, {
+      method: "PATCH",
+      body: JSON.stringify({
         position: pending.position,
         status: pending.status,
       }),
-    );
-    pendingPositionRef.current = null;
-    lastPositionSentAtRef.current = Date.now();
-  }, []);
+    }).catch(() => {
+      // Presence is best-effort; the next movement tick will send a fresh position.
+    });
+  }, [memberId, workspaceId]);
 
   const sendPosition = useCallback(
     (position: StageActorPosition, status: PresenceStatus = "walking") => {
@@ -4837,11 +5060,10 @@ function useWorkspacePresence(
       return;
     }
 
-    let closedByEffect = false;
-    const socket = new WebSocket(url);
-    socketRef.current = socket;
+    const source = new EventSource(url);
+    eventSourceRef.current = source;
 
-    socket.onmessage = (event) => {
+    source.onmessage = (event) => {
       const message = parsePresenceMessage(event.data);
       if (!message) return;
 
@@ -4903,18 +5125,15 @@ function useWorkspacePresence(
       }
     };
 
-    socket.onclose = () => {
-      if (socketRef.current === socket) socketRef.current = null;
-      if (!closedByEffect) {
-        setOnlineMemberIds(null);
-        setRemoteMemberPositions({});
+    source.onerror = () => {
+      if (source.readyState === EventSource.CLOSED && eventSourceRef.current === source) {
+        eventSourceRef.current = null;
       }
     };
 
     return () => {
-      closedByEffect = true;
-      if (socketRef.current === socket) socketRef.current = null;
-      socket.close();
+      if (eventSourceRef.current === source) eventSourceRef.current = null;
+      source.close();
     };
   }, [memberId, workspaceId]);
 
@@ -5157,9 +5376,7 @@ function SettingsSelectModal({
           onClick={onOpenClaw}
         />
       </Modal.Body>
-      <Modal.Footer>
-        <Button type="button" onClick={onClose}>닫기</Button>
-      </Modal.Footer>
+      <Modal.Footer />
     </Modal>
   );
 }
@@ -5337,7 +5554,6 @@ function TaskDashboardModal({
         >
           <GlyphText glyph="◇">3초마다 자동 갱신</GlyphText>
         </span>
-        <Button type="button" variant="ghost" onClick={onClose}>닫기</Button>
       </Modal.Footer>
     </Modal>
   );
@@ -5994,9 +6210,6 @@ function AgentHireModal({
         </Modal.Body>
 
         <Modal.Footer>
-          <Button type="button" variant="ghost" onClick={onClose} disabled={submitting}>
-            닫기
-          </Button>
           <Button type="submit" icon={<UserPlus />} loading={submitting}>
             고용
           </Button>
@@ -6112,9 +6325,6 @@ function SlackIntegrationModal({
         <Button type="button" variant="ghost" icon={<ArrowLeft />} onClick={onBack} disabled={submitting}>
           채널 설정
         </Button>
-        <Button type="button" variant="ghost" onClick={onClose} disabled={submitting}>
-          닫기
-        </Button>
       </Modal.Footer>
     </Modal>
   );
@@ -6155,7 +6365,6 @@ function DiscordIntegrationModal({
         <Button type="button" variant="ghost" icon={<ArrowLeft />} onClick={onBack}>
           채널 설정
         </Button>
-        <Button type="button" onClick={onClose}>닫기</Button>
       </Modal.Footer>
     </Modal>
   );
@@ -6270,9 +6479,6 @@ function GithubIntegrationModal({
           <Button type="button" variant="ghost" icon={<ArrowLeft />} onClick={onBack} disabled={submitting}>
             채널 설정
           </Button>
-          <Button type="button" variant="ghost" onClick={onClose} disabled={submitting}>
-            닫기
-          </Button>
           {!saved && (
             <Button type="submit" icon={<KeyRound />} loading={submitting} disabled={!isAdmin}>
               연결 저장
@@ -6384,9 +6590,6 @@ function OpenClawIntegrationModal({
         <Modal.Footer>
           <Button type="button" variant="ghost" icon={<ArrowLeft />} onClick={onBack} disabled={busy}>
             채널 설정
-          </Button>
-          <Button type="button" variant="ghost" onClick={onClose} disabled={busy}>
-            닫기
           </Button>
           {!saved?.bound && (
             <Button type="submit" icon={<KeyRound />} loading={submitting} disabled={testing}>
@@ -7327,6 +7530,7 @@ function OrchestrationPlanModal({
           ))}
         </div>
       </Modal.Body>
+      <Modal.Footer />
     </Modal>
   );
 }
@@ -7421,6 +7625,7 @@ function ArtifactFileModal({
           </pre>
         )}
       </Modal.Body>
+      <Modal.Footer />
     </Modal>
   );
 }
@@ -7528,6 +7733,7 @@ function WorkspaceFilesModal({
           <ArtifactTreeNodes nodes={children} depth={0} onOpenFile={onOpenFile} />
         </div>
       </Modal.Body>
+      <Modal.Footer />
     </Modal>
   );
 }

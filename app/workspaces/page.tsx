@@ -71,6 +71,10 @@ export default function WorkspacesPage() {
     (acc, w) => acc + (w.agentCount ?? 0),
     0,
   );
+  const completedCount = workspaces.reduce(
+    (acc, w) => acc + (w.completedTaskCount ?? 0),
+    0,
+  );
 
   return (
     <T4Screen title="WORKSPACES · SELECT YOUR QUEST">
@@ -142,7 +146,7 @@ export default function WorkspacesPage() {
               </ArcadeButton>
             </Link>
             <ArcadeButton color={t4.dim} onClick={handleLogout}>
-              LOG OUT
+              LOGOUT
             </ArcadeButton>
           </div>
         </div>
@@ -160,25 +164,25 @@ export default function WorkspacesPage() {
               label: "WORKPLACES JOINED",
               value: String(workspaces.length).padStart(2, "0"),
               color: t4.pink,
-              sub: "active workspaces",
+              sub: "활성 워크스페이스",
             },
             {
               label: "TASKS · ACTIVE",
               value: String(activeCount).padStart(2, "0"),
               color: t4.mp,
-              sub: "running tasks",
+              sub: "진행 중인 태스크",
             },
             {
               label: "AGENT ALLIES",
               value: String(agentCount).padStart(2, "0"),
               color: t4.agent,
-              sub: "summoned",
+              sub: "소환된 에이전트",
             },
             {
-              label: "TEAM IMPACT / WK",
-              value: "+38k",
+              label: "TASKS · DONE",
+              value: String(completedCount).padStart(2, "0"),
               color: t4.xp,
-              sub: "↑ 12%",
+              sub: "누적 완료",
             },
           ].map((tile) => (
             <T4Panel
