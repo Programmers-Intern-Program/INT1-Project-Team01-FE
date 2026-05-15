@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bulletin Board</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <section class="board-card" aria-labelledby="board-title">
+      <header class="card-header">
+        <p class="eyebrow">Java Board API</p>
+        <div class="header-row">
+          <div>
+            <h1 id="board-title">Bulletin board</h1>
+            <p class="description">Create, read, update, and delete posts through the Java backend.</p>
+          </div>
+          <button id="refresh-button" class="secondary-button" type="button">Refresh</button>
+        </div>
+      </header>
+
+      <section id="status-panel" class="status-panel idle" aria-live="polite" aria-atomic="true">
+        <p id="status-message">Loading posts...</p>
+      </section>
+
+      <div class="board-layout">
+        <section class="post-list-section" aria-labelledby="post-list-title">
+          <div class="section-heading">
+            <h2 id="post-list-title">Posts</h2>
+            <span id="post-count" class="post-count">0</span>
+          </div>
+          <div id="post-list" class="post-list" role="list"></div>
+          <p id="empty-state" class="empty-state" hidden>No posts yet. Write the first one.</p>
+        </section>
+
+        <section class="post-detail-section" aria-labelledby="detail-title">
+          <article id="post-detail" class="post-detail empty">
+            <p class="eyebrow">Detail</p>
+            <h2 id="detail-title">Select a post</h2>
+            <p class="description">Choose a post from the list to view, edit, or delete it.</p>
+          </article>
+        </section>
+      </div>
+
+      <section class="editor-section" aria-labelledby="editor-title">
+        <div class="section-heading">
+          <h2 id="editor-title">Write a post</h2>
+          <button id="cancel-edit-button" class="link-button" type="button" hidden>Cancel edit</button>
+        </div>
+
+        <form id="post-form" class="post-form" novalidate>
+          <input id="post-id" name="id" type="hidden">
+          <div class="field-group">
+            <label for="title">Title</label>
+            <input id="title" name="title" type="text" maxlength="100" placeholder="Post title" required>
+          </div>
+          <div class="field-group">
+            <label for="author">Author <span>(optional)</span></label>
+            <input id="author" name="author" type="text" maxlength="50" placeholder="anonymous">
+          </div>
+          <div class="field-group full-width">
+            <label for="content">Content</label>
+            <textarea id="content" name="content" maxlength="5000" placeholder="Write your post..." required></textarea>
+          </div>
+          <button id="save-button" class="primary-button" type="submit">
+            <span class="button-label">Create post</span>
+            <span class="button-spinner" aria-hidden="true"></span>
+          </button>
+        </form>
+      </section>
+    </section>
+  </main>
+
+  <template id="post-list-item-template">
+    <button class="post-list-item" type="button" role="listitem">
+      <span class="post-list-title"></span>
+      <span class="post-list-meta"></span>
+    </button>
+  </template>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
