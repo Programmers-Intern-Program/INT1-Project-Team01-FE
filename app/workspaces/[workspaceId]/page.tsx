@@ -2803,7 +2803,7 @@ function StageActor({
           : travel
           ? `left ${travelMs ?? 320}ms linear, top ${travelMs ?? 320}ms linear`
           : actor.kind === "member"
-          ? "left 100ms linear, top 100ms linear"
+          ? "left 30ms linear, top 30ms linear"
           : "left 90ms linear, top 90ms linear",
       }}
       onClick={() => onSelect(actor)}
@@ -4718,7 +4718,7 @@ const PLAYER_STAGE_BOUNDS = {
   maxY: 91,
 };
 const AGENT_TRAVEL_MIN_SEGMENT_MS = 90;
-const PRESENCE_POSITION_THROTTLE_MS = 50;
+const PRESENCE_POSITION_THROTTLE_MS = 20;
 const QUEST_MARKER_POSITION: StageActorPosition = { left: "90.4%", top: "75.8%" };
 const QUEST_INTERACTION_RADIUS_PCT = 6.5;
 const ACTOR_INTERACTION_RADIUS_PCT = 7;
