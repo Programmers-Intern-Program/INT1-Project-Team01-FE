@@ -80,8 +80,6 @@ import {
   type ChatMessageResponse,
 } from "@/lib/api/chat";
 import {
-  getArtifactFile,
-  getArtifactTree,
   getOrchestrationPlanArtifact,
   type ArtifactFileContent,
   type ArtifactNode,
@@ -2805,7 +2803,7 @@ function StageActor({
           : travel
           ? `left ${travelMs ?? 320}ms linear, top ${travelMs ?? 320}ms linear`
           : actor.kind === "member"
-          ? "left 12ms linear, top 12ms linear"
+          ? "left 100ms linear, top 100ms linear"
           : "left 90ms linear, top 90ms linear",
       }}
       onClick={() => onSelect(actor)}
@@ -4720,7 +4718,7 @@ const PLAYER_STAGE_BOUNDS = {
   maxY: 91,
 };
 const AGENT_TRAVEL_MIN_SEGMENT_MS = 90;
-const PRESENCE_POSITION_THROTTLE_MS = 16;
+const PRESENCE_POSITION_THROTTLE_MS = 50;
 const QUEST_MARKER_POSITION: StageActorPosition = { left: "90.4%", top: "75.8%" };
 const QUEST_INTERACTION_RADIUS_PCT = 6.5;
 const ACTOR_INTERACTION_RADIUS_PCT = 7;
@@ -7684,15 +7682,19 @@ function ArtifactFileModal({
       setLoading(true);
       setError("");
     });
-    getArtifactFile(workspaceId, path)
-      .then((next) => {
+    fetch(`/hardcoded-workspace/${path}`)
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`파일을 찾을 수 없습니다 (${response.status})`);
+        }
+        const content = await response.text();
         if (cancelled) return;
-        setData(next);
+        const name = nameHint ?? path.split("/").pop() ?? path;
+        setData({ workspaceId, path, name, content });
       })
       .catch((err) => {
         if (cancelled) return;
-        const apiErr = err as ApiError;
-        setError(apiErr?.message ?? "파일을 불러오지 못했습니다.");
+        setError(err instanceof Error ? err.message : "파일을 불러오지 못했습니다.");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -7700,7 +7702,7 @@ function ArtifactFileModal({
     return () => {
       cancelled = true;
     };
-  }, [open, path, workspaceId]);
+  }, [open, path, workspaceId, nameHint]);
 
   const title = data?.name ?? nameHint ?? path ?? "ARTIFACT";
 
@@ -7748,6 +7750,30 @@ function ArtifactFileModal({
   );
 }
 
+const HARDCODED_WORKSPACE_FILES: { name: string; path: string }[] = [
+  { name: "app.js", path: "app.js" },
+  { name: "BoardBackend.java", path: "BoardBackend.java" },
+  { name: "BoardBackendTest.java", path: "BoardBackendTest.java" },
+  { name: "Calculator.java", path: "Calculator.java" },
+  { name: "CalculatorBackend.java", path: "CalculatorBackend.java" },
+  { name: "CalculatorBackendTest.java", path: "CalculatorBackendTest.java" },
+  { name: "index.html", path: "index.html" },
+  { name: "Multiplication.java", path: "Multiplication.java" },
+  { name: "styles.css", path: "styles.css" },
+];
+
+function buildHardcodedTree(workspaceId: number): ArtifactTree {
+  return {
+    workspaceId,
+    rootPath: ".openclaw/workspace-13",
+    children: HARDCODED_WORKSPACE_FILES.map((file) => ({
+      name: file.name,
+      path: file.path,
+      type: "FILE",
+    })),
+  };
+}
+
 function WorkspaceFilesModal({
   open,
   workspaceId,
@@ -7772,28 +7798,11 @@ function WorkspaceFilesModal({
       });
       return;
     }
-    let cancelled = false;
     queueMicrotask(() => {
-      if (cancelled) return;
-      setLoading(true);
+      setLoading(false);
       setError("");
+      setTree(buildHardcodedTree(workspaceId));
     });
-    getArtifactTree(workspaceId)
-      .then((next) => {
-        if (cancelled) return;
-        setTree(next);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        const apiErr = err as ApiError;
-        setError(apiErr?.message ?? "파일 트리를 불러오지 못했습니다.");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
   }, [open, workspaceId, reloadKey]);
 
   const children = tree?.children ?? [];
